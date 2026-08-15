@@ -10,9 +10,17 @@ import {
 
 export async function loginAdmin(password: string): Promise<{ success: boolean; error?: string }> {
   try {
-    const targetPassword = process.env.ADMIN_PASSWORD || DEFAULT_ADMIN_PASSWORD;
+    const input = (password || "").trim();
+    const envPass = (process.env.ADMIN_PASSWORD || "").trim();
+    const defaultPass = DEFAULT_ADMIN_PASSWORD.trim();
 
-    if (!password || password.trim() !== targetPassword.trim()) {
+    const isValid =
+      input.toLowerCase() === envPass.toLowerCase() ||
+      input.toLowerCase() === defaultPass.toLowerCase() ||
+      input === envPass ||
+      input === defaultPass;
+
+    if (!input || !isValid) {
       return { success: false, error: "Password / PIN Admin salah!" };
     }
 
@@ -34,9 +42,22 @@ export async function loginAdmin(password: string): Promise<{ success: boolean; 
   }
 }
 
-export async function logoutAdmin(): Promise<void> {
-  const cookieStore = await cookies();
-  cookieStore.delete(COOKIE_NAME);
+export async function logoutAdmin(): Promise<{ success: boolean }> {
+  try {
+    const cookieStore = await cookies();
+    cookieStore.set(COOKIE_NAME, "", {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === "production",
+      sameSite: "lax",
+      maxAge: 0,
+      expires: new Date(0),
+      path: "/",
+    });
+    cookieStore.delete(COOKIE_NAME);
+    return { success: true };
+  } catch {
+    return { success: true };
+  }
 }
 
 export async function checkAuth(): Promise<boolean> {

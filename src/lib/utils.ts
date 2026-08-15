@@ -102,3 +102,104 @@ export function formatBulanTahun(bulanTahun: string): string {
   }
   return bulanTahun;
 }
+
+/**
+ * Format DD/MM/YYYY to Indonesian readable date.
+ * e.g. "15/08/2026" -> "15 Agustus 2026"
+ */
+export function formatTanggalIndo(tanggal: string, short = false): string {
+  const parts = tanggal.split("/");
+  if (parts.length !== 3) return tanggal;
+  const [d, m, y] = parts;
+  const monthNames = short
+    ? ["Jan", "Feb", "Mar", "Apr", "Mei", "Jun", "Jul", "Agu", "Sep", "Okt", "Nov", "Des"]
+    : [
+        "Januari", "Februari", "Maret", "April", "Mei", "Juni",
+        "Juli", "Agustus", "September", "Oktober", "November", "Desember",
+      ];
+  const mIdx = parseInt(m, 10) - 1;
+  if (mIdx >= 0 && mIdx < 12) {
+    return `${parseInt(d, 10)} ${monthNames[mIdx]} ${y}`;
+  }
+  return tanggal;
+}
+
+/**
+ * Convert DD/MM/YYYY to ISO date YYYY-MM-DD (for <input type="date">).
+ */
+export function formatTanggalToISO(tanggal: string): string {
+  const parts = tanggal.split("/");
+  if (parts.length !== 3) return "";
+  const [d, m, y] = parts;
+  return `${y}-${m.padStart(2, "0")}-${d.padStart(2, "0")}`;
+}
+
+/**
+ * Distinct badge color theme per Generation/Angkatan.
+ */
+const GEN_COLOR_PALETTES = [
+  {
+    gen: "10",
+    badge: "border-sky-500/40 bg-sky-500/15 text-sky-700 dark:text-sky-300",
+    cardSelected: "border-sky-500 bg-sky-500/10 text-sky-700 dark:text-sky-300 ring-2 ring-sky-500/20",
+    dot: "bg-sky-500",
+  },
+  {
+    gen: "11",
+    badge: "border-purple-500/40 bg-purple-500/15 text-purple-700 dark:text-purple-300",
+    cardSelected: "border-purple-500 bg-purple-500/10 text-purple-700 dark:text-purple-300 ring-2 ring-purple-500/20",
+    dot: "bg-purple-500",
+  },
+  {
+    gen: "12",
+    badge: "border-emerald-500/40 bg-emerald-500/15 text-emerald-700 dark:text-emerald-300",
+    cardSelected: "border-emerald-500 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 ring-2 ring-emerald-500/20",
+    dot: "bg-emerald-500",
+  },
+  {
+    gen: "13",
+    badge: "border-amber-500/40 bg-amber-500/15 text-amber-700 dark:text-amber-300",
+    cardSelected: "border-amber-500 bg-amber-500/10 text-amber-700 dark:text-amber-300 ring-2 ring-amber-500/20",
+    dot: "bg-amber-500",
+  },
+  {
+    gen: "14",
+    badge: "border-rose-500/40 bg-rose-500/15 text-rose-700 dark:text-rose-300",
+    cardSelected: "border-rose-500 bg-rose-500/10 text-rose-700 dark:text-rose-300 ring-2 ring-rose-500/20",
+    dot: "bg-rose-500",
+  },
+  {
+    gen: "15",
+    badge: "border-teal-500/40 bg-teal-500/15 text-teal-700 dark:text-teal-300",
+    cardSelected: "border-teal-500 bg-teal-500/10 text-teal-700 dark:text-teal-300 ring-2 ring-teal-500/20",
+    dot: "bg-teal-500",
+  },
+  {
+    gen: "16",
+    badge: "border-indigo-500/40 bg-indigo-500/15 text-indigo-700 dark:text-indigo-300",
+    cardSelected: "border-indigo-500 bg-indigo-500/10 text-indigo-700 dark:text-indigo-300 ring-2 ring-indigo-500/20",
+    dot: "bg-indigo-500",
+  },
+];
+
+export function getGenBadgeColor(gen: string): string {
+  const match = GEN_COLOR_PALETTES.find((p) => p.gen === gen);
+  if (match) return match.badge;
+  const num = parseInt(gen, 10);
+  if (!isNaN(num)) {
+    const idx = Math.abs(num) % GEN_COLOR_PALETTES.length;
+    return GEN_COLOR_PALETTES[idx].badge;
+  }
+  return "border-accent/40 bg-accent/15 text-accent";
+}
+
+export function getGenCardSelectedStyle(gen: string): string {
+  const match = GEN_COLOR_PALETTES.find((p) => p.gen === gen);
+  if (match) return match.cardSelected;
+  const num = parseInt(gen, 10);
+  if (!isNaN(num)) {
+    const idx = Math.abs(num) % GEN_COLOR_PALETTES.length;
+    return GEN_COLOR_PALETTES[idx].cardSelected;
+  }
+  return "border-accent bg-accent/10 text-accent font-extrabold ring-2 ring-accent/20";
+}

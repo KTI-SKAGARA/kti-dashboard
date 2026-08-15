@@ -102,6 +102,7 @@ export interface FilterState {
   gen: FilterGen;
   kelas: string; // "" means all
   bulan: string; // "" means all (format: MM-YYYY)
+  tanggal: string; // "" means all (format: DD/MM/YYYY)
   status: StatusAbsen | ""; // "" means all
   search: string;
 }
@@ -109,6 +110,7 @@ export interface FilterState {
 export interface FilterOptions {
   kelasList: string[];
   bulanList: string[];
+  tanggalList: string[];
 }
 
 export interface ClassSummary {

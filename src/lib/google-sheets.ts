@@ -7,9 +7,34 @@ import {
   getGenTabName,
   CONFIG_TAB,
 } from "@/types/attendance";
-import { normalizeName } from "@/lib/utils";
+import { normalizeName, getBulanTahunFromDate } from "@/lib/utils";
 import fs from "fs";
 import path from "path";
+import type { GoogleSpreadsheet, GoogleSpreadsheetRow } from "google-spreadsheet";
+
+// ---------------------------------------------------------------------------
+// In-Memory Performance Cache (TTL)
+// ---------------------------------------------------------------------------
+
+let cachedDoc: GoogleSpreadsheet | null = null;
+let docLoadedAt = 0;
+const DOC_TTL_MS = 60 * 1000; // 60 seconds
+
+const recordsCache = new Map<
+  string,
+  { data: AttendanceRecord[]; timestamp: number }
+>();
+const RECORDS_TTL_MS = 15 * 1000; // 15 seconds
+
+export function invalidateCache(gen?: Gen) {
+  if (gen) {
+    recordsCache.delete(gen);
+  } else {
+    recordsCache.clear();
+  }
+  cachedDoc = null;
+  docLoadedAt = 0;
+}
 
 // ---------------------------------------------------------------------------
 // Mock store (used when Google Sheets credentials are not configured)
@@ -81,8 +106,13 @@ export function isGoogleSheetsConfigured(): boolean {
 // Google Spreadsheet connection
 // ---------------------------------------------------------------------------
 
-async function getDoc() {
-  const { GoogleSpreadsheet } = await import("google-spreadsheet");
+async function getDoc(forceRefresh = false): Promise<GoogleSpreadsheet> {
+  const now = Date.now();
+  if (cachedDoc && !forceRefresh && now - docLoadedAt < DOC_TTL_MS) {
+    return cachedDoc;
+  }
+
+  const { GoogleSpreadsheet: GSClass } = await import("google-spreadsheet");
   const { JWT } = await import("google-auth-library");
 
   const creds = getServiceAccountCredentials();
@@ -92,16 +122,18 @@ async function getDoc() {
     scopes: ["https://www.googleapis.com/auth/spreadsheets"],
   });
 
-  const doc = new GoogleSpreadsheet(
+  const doc = new GSClass(
     process.env.GOOGLE_SPREADSHEET_ID!,
     serviceAccountAuth
   );
   await doc.loadInfo();
+  cachedDoc = doc;
+  docLoadedAt = now;
   return doc;
 }
 
-async function getSheet(tabName: string) {
-  const doc = await getDoc();
+async function getSheet(tabName: string, forceRefresh = false) {
+  const doc = await getDoc(forceRefresh);
 
   let sheet = doc.sheetsByTitle[tabName];
   if (!sheet) {
@@ -143,59 +175,49 @@ export async function getGenConfig(): Promise<GenConfig[]> {
     const doc = await getDoc();
     const configSheet = doc.sheetsByTitle[CONFIG_TAB];
 
-    if (!configSheet) {
-      // No CONFIG tab yet — derive from existing GEN tabs
-      const gens: GenConfig[] = [];
-      for (const [title] of Object.entries(doc.sheetsByTitle)) {
-        const match = title.match(/^GEN\s+(\d+)$/i);
-        if (match) {
-          gens.push({ gen: match[1], status: "aktif" });
+    // Collect all gens from baseline default gens + all sheet tab titles in the spreadsheet
+    const genMap = new Map<Gen, "aktif" | "lulus">();
+    MOCK_GENS.forEach((g) => genMap.set(g, "aktif"));
+
+    for (const title of Object.keys(doc.sheetsByTitle)) {
+      const match = title.match(/^(?:GEN|Kelas)[_\s]+(\d+)$/i);
+      if (match) {
+        genMap.set(match[1], "aktif");
+      }
+    }
+
+    if (configSheet) {
+      const rows: GoogleSpreadsheetRow[] = await configSheet.getRows();
+      for (const row of rows) {
+        const g = (row.get("Gen") ?? "").trim();
+        const s = (row.get("Status") ?? "aktif").trim().toLowerCase() === "lulus" ? "lulus" : "aktif";
+        if (g) {
+          genMap.set(g, s);
         }
       }
-      return gens.sort((a, b) => Number(a.gen) - Number(b.gen));
     }
 
-    const rows = await configSheet.getRows();
-    const config: GenConfig[] = rows
-      .map((row) => ({
-        gen: row.get("Gen") ?? "",
-        status: (row.get("Status") ?? "aktif") as GenConfig["status"],
-      }))
-      .filter((c) => c.gen);
+    const result: GenConfig[] = Array.from(genMap.entries())
+      .map(([gen, status]) => ({ gen, status }))
+      .sort((a, b) => Number(a.gen) - Number(b.gen));
 
-    // Also add any GEN tabs not in CONFIG (fallback)
-    const configGens = new Set(config.map((c) => c.gen));
-    for (const [title] of Object.entries(doc.sheetsByTitle)) {
-      const match = title.match(/^GEN\s+(\d+)$/i);
-      if (match && !configGens.has(match[1])) {
-        config.push({ gen: match[1], status: "aktif" });
-      }
-    }
-
-    return config.sort((a, b) => Number(a.gen) - Number(b.gen));
-  } catch {
+    return result;
+  } catch (error) {
+    console.error("Error fetching gen config:", error);
     return [...MOCK_GEN_CONFIG];
   }
 }
 
-export async function getActiveGens(): Promise<Gen[]> {
-  const config = await getGenConfig();
-  return config.filter((c) => c.status === "aktif").map((c) => c.gen);
-}
-
 export async function ensureGenTab(gen: Gen): Promise<{ created: boolean }> {
-  const tabName = getGenTabName(gen);
-
   if (!isGoogleSheetsConfigured()) {
-    if (!MOCK_GEN_CONFIG.find((c) => c.gen === gen)) {
-      MOCK_GEN_CONFIG.push({ gen, status: "aktif" });
-    }
     return { created: false };
   }
 
-  const doc = await getDoc();
-  let configSheet = doc.sheetsByTitle[CONFIG_TAB];
+  const tabName = getGenTabName(gen);
+  const doc = await getDoc(true); // force refresh sheet info
+
   let genSheet = doc.sheetsByTitle[tabName];
+  let configSheet = doc.sheetsByTitle[CONFIG_TAB];
 
   // Create GEN tab if missing
   let created = false;
@@ -238,8 +260,8 @@ export async function ensureGenTab(gen: Gen): Promise<{ created: boolean }> {
   }
 
   // Upsert CONFIG row
-  const configRows = await configSheet.getRows();
-  const existing = configRows.find((r) => r.get("Gen") === gen);
+  const configRows: GoogleSpreadsheetRow[] = await configSheet.getRows();
+  const existing = configRows.find((r: GoogleSpreadsheetRow) => r.get("Gen") === gen);
   if (existing) {
     existing.set("Status", "aktif");
     await existing.save();
@@ -247,6 +269,7 @@ export async function ensureGenTab(gen: Gen): Promise<{ created: boolean }> {
     await configSheet.addRow({ Gen: gen, Status: "aktif" });
   }
 
+  invalidateCache();
   return { created };
 }
 
@@ -269,21 +292,25 @@ export async function markGenLulus(gen: Gen, lulus: boolean): Promise<void> {
     });
   }
 
-  const rows = await configSheet.getRows();
-  const existing = rows.find((r) => r.get("Gen") === gen);
+  const rows: GoogleSpreadsheetRow[] = await configSheet.getRows();
+  const existing = rows.find((r: GoogleSpreadsheetRow) => r.get("Gen") === gen);
   if (existing) {
     existing.set("Status", status);
     await existing.save();
   } else {
     await configSheet.addRow({ Gen: gen, Status: status });
   }
+  invalidateCache();
 }
 
 // ---------------------------------------------------------------------------
-// Records CRUD
+// Records CRUD with TTL Caching
 // ---------------------------------------------------------------------------
 
-export async function fetchRecords(gen: Gen): Promise<AttendanceRecord[]> {
+export async function fetchRecords(
+  gen: Gen,
+  force = false
+): Promise<AttendanceRecord[]> {
   if (!isGoogleSheetsConfigured()) {
     return [
       ...getMockDataForGen(gen),
@@ -291,11 +318,17 @@ export async function fetchRecords(gen: Gen): Promise<AttendanceRecord[]> {
     ];
   }
 
+  const now = Date.now();
+  const cached = recordsCache.get(gen);
+  if (!force && cached && now - cached.timestamp < RECORDS_TTL_MS) {
+    return cached.data;
+  }
+
   const tabName = getGenTabName(gen);
   const sheet = await getSheet(tabName);
-  const rows = await sheet.getRows();
+  const rows: GoogleSpreadsheetRow[] = await sheet.getRows();
 
-  return rows.map((row) => ({
+  const data: AttendanceRecord[] = rows.map((row: GoogleSpreadsheetRow) => ({
     tanggal: row.get("Tanggal") ?? "",
     nama: normalizeName(row.get("Nama") ?? ""),
     kelas: row.get("Kelas") ?? "",
@@ -303,6 +336,9 @@ export async function fetchRecords(gen: Gen): Promise<AttendanceRecord[]> {
     nominalKas: Number(row.get("Nominal_Kas") ?? 0),
     bulanTahun: row.get("Bulan_Tahun") ?? "",
   }));
+
+  recordsCache.set(gen, { data, timestamp: now });
+  return data;
 }
 
 export async function appendRecord(
@@ -331,6 +367,8 @@ export async function appendRecord(
     Nominal_Kas: formattedRecord.nominalKas,
     Bulan_Tahun: formattedRecord.bulanTahun,
   });
+
+  invalidateCache(gen);
 }
 
 export async function appendRecords(
@@ -361,6 +399,7 @@ export async function appendRecords(
   }));
 
   await sheet.addRows(rows);
+  invalidateCache(gen);
 }
 
 export async function deleteRecord(
@@ -380,11 +419,12 @@ export async function deleteRecord(
 
   const tabName = getGenTabName(gen);
   const sheet = await getSheet(tabName);
-  const rows = await sheet.getRows();
+  const rows: GoogleSpreadsheetRow[] = await sheet.getRows();
 
   if (recordIndex >= 0 && recordIndex < rows.length) {
     await rows[recordIndex].delete();
   }
+  invalidateCache(gen);
 }
 
 export async function deleteRecordsBatch(
@@ -408,52 +448,199 @@ export async function deleteRecordsBatch(
 
   const tabName = getGenTabName(gen);
   const sheet = await getSheet(tabName);
-  const rows = await sheet.getRows();
+  const rows: GoogleSpreadsheetRow[] = await sheet.getRows();
 
   for (const idx of sorted) {
     if (idx >= 0 && idx < rows.length) {
       await rows[idx].delete();
     }
   }
+  invalidateCache(gen);
 }
 
 export async function updateRecord(
   gen: Gen,
   recordIndex: number,
-  data: Partial<AttendanceRecord>
+  data: Partial<AttendanceRecord> & { targetGen?: Gen }
 ): Promise<void> {
+  const targetGen = data.targetGen && data.targetGen !== gen ? data.targetGen : null;
+
   if (!isGoogleSheetsConfigured()) {
     const mockList = getMockDataForGen(gen);
     const mockLen = mockList.length;
+    let targetRecord: AttendanceRecord | null = null;
+
     if (recordIndex < mockLen) {
-      const record = mockList[recordIndex];
-      if (data.nama !== undefined) record.nama = data.nama;
-      if (data.kelas !== undefined) record.kelas = data.kelas;
-      if (data.statusAbsen !== undefined) record.statusAbsen = data.statusAbsen;
-      if (data.nominalKas !== undefined) record.nominalKas = data.nominalKas;
-      return;
+      targetRecord = { ...mockList[recordIndex] };
+    } else {
+      const appendedIdx = recordIndex - mockLen;
+      if (mockAppended[gen] && appendedIdx >= 0 && appendedIdx < mockAppended[gen].length) {
+        targetRecord = { ...mockAppended[gen][appendedIdx] };
+      }
     }
-    const appendedIdx = recordIndex - mockLen;
-    if (mockAppended[gen] && appendedIdx >= 0 && appendedIdx < mockAppended[gen].length) {
-      const record = mockAppended[gen][appendedIdx];
-      if (data.nama !== undefined) record.nama = data.nama;
-      if (data.kelas !== undefined) record.kelas = data.kelas;
-      if (data.statusAbsen !== undefined) record.statusAbsen = data.statusAbsen;
-      if (data.nominalKas !== undefined) record.nominalKas = data.nominalKas;
+
+    if (targetRecord) {
+      if (data.nama !== undefined) targetRecord.nama = normalizeName(data.nama);
+      if (data.kelas !== undefined) targetRecord.kelas = data.kelas;
+      if (data.statusAbsen !== undefined) targetRecord.statusAbsen = data.statusAbsen;
+      if (data.nominalKas !== undefined) targetRecord.nominalKas = data.nominalKas;
+      if (data.tanggal !== undefined) {
+        targetRecord.tanggal = data.tanggal;
+        targetRecord.bulanTahun =
+          data.bulanTahun ||
+          (targetRecord.tanggal
+            ? getBulanTahunFromDate(targetRecord.tanggal)
+            : targetRecord.bulanTahun);
+      }
+
+      if (targetGen) {
+        if (!mockAppended[targetGen]) mockAppended[targetGen] = [];
+        mockAppended[targetGen].push(targetRecord);
+        if (recordIndex >= mockLen) {
+          const appendedIdx = recordIndex - mockLen;
+          mockAppended[gen]?.splice(appendedIdx, 1);
+        }
+      } else {
+        if (recordIndex < mockLen) {
+          mockList[recordIndex] = targetRecord;
+        } else {
+          const appendedIdx = recordIndex - mockLen;
+          if (mockAppended[gen] && appendedIdx >= 0 && appendedIdx < mockAppended[gen].length) {
+            mockAppended[gen][appendedIdx] = targetRecord;
+          }
+        }
+      }
     }
     return;
   }
 
   const tabName = getGenTabName(gen);
   const sheet = await getSheet(tabName);
-  const rows = await sheet.getRows();
+  const rows: GoogleSpreadsheetRow[] = await sheet.getRows();
 
   if (recordIndex >= 0 && recordIndex < rows.length) {
     const row = rows[recordIndex];
-    if (data.nama !== undefined) row.set("Nama", normalizeName(data.nama));
-    if (data.kelas !== undefined) row.set("Kelas", data.kelas);
-    if (data.statusAbsen !== undefined) row.set("Status_Absen", data.statusAbsen);
-    if (data.nominalKas !== undefined) row.set("Nominal_Kas", String(data.nominalKas));
-    await row.save();
+    const existingTanggal = row.get("Tanggal") ?? "";
+    const existingNama = row.get("Nama") ?? "";
+    const existingKelas = row.get("Kelas") ?? "";
+    const existingStatus = (row.get("Status_Absen") ?? "Hadir") as StatusAbsen;
+    const existingKas = Number(row.get("Nominal_Kas") ?? 0);
+    const existingBulan = row.get("Bulan_Tahun") ?? "";
+
+    const finalTanggal = data.tanggal !== undefined ? data.tanggal : existingTanggal;
+    const finalNama = data.nama !== undefined ? normalizeName(data.nama) : existingNama;
+    const finalKelas = data.kelas !== undefined ? data.kelas : existingKelas;
+    const finalStatus = data.statusAbsen !== undefined ? data.statusAbsen : existingStatus;
+    const finalKas = data.nominalKas !== undefined ? data.nominalKas : existingKas;
+    const finalBulan =
+      data.bulanTahun !== undefined
+        ? data.bulanTahun
+        : data.tanggal
+        ? getBulanTahunFromDate(finalTanggal)
+        : existingBulan;
+
+    if (targetGen) {
+      await ensureGenTab(targetGen);
+      const targetSheet = await getSheet(getGenTabName(targetGen));
+      await targetSheet.addRow({
+        Tanggal: finalTanggal,
+        Nama: finalNama,
+        Kelas: finalKelas,
+        Status_Absen: finalStatus,
+        Nominal_Kas: finalKas,
+        Bulan_Tahun: finalBulan,
+      });
+      await row.delete();
+      invalidateCache(targetGen);
+    } else {
+      if (data.nama !== undefined) row.set("Nama", finalNama);
+      if (data.kelas !== undefined) row.set("Kelas", finalKelas);
+      if (data.statusAbsen !== undefined) row.set("Status_Absen", finalStatus);
+      if (data.nominalKas !== undefined) row.set("Nominal_Kas", String(finalKas));
+      if (data.tanggal !== undefined) {
+        row.set("Tanggal", finalTanggal);
+        row.set("Bulan_Tahun", finalBulan);
+      }
+      await row.save();
+    }
   }
+
+  invalidateCache(gen);
+}
+
+export async function moveRecordsBatch(
+  fromGen: Gen,
+  recordIndexes: number[],
+  targetGen: Gen
+): Promise<void> {
+  if (fromGen === targetGen || recordIndexes.length === 0) return;
+
+  const sorted = [...recordIndexes].sort((a, b) => b - a);
+
+  if (!isGoogleSheetsConfigured()) {
+    const mockList = getMockDataForGen(fromGen);
+    const mockLen = mockList.length;
+    if (!mockAppended[targetGen]) mockAppended[targetGen] = [];
+
+    for (const idx of sorted) {
+      let record: AttendanceRecord | null = null;
+      if (idx < mockLen) {
+        record = { ...mockList[idx] };
+      } else {
+        const appendedIdx = idx - mockLen;
+        if (mockAppended[fromGen] && appendedIdx >= 0 && appendedIdx < mockAppended[fromGen].length) {
+          record = mockAppended[fromGen][appendedIdx];
+          mockAppended[fromGen].splice(appendedIdx, 1);
+        }
+      }
+      if (record) {
+        mockAppended[targetGen].push(record);
+      }
+    }
+    return;
+  }
+
+  const fromSheet = await getSheet(getGenTabName(fromGen));
+  const rows: GoogleSpreadsheetRow[] = await fromSheet.getRows();
+
+  await ensureGenTab(targetGen);
+  const targetSheet = await getSheet(getGenTabName(targetGen));
+
+  const recordsToMove: AttendanceRecord[] = [];
+  const rowsToDelete: GoogleSpreadsheetRow[] = [];
+
+  for (const idx of sorted) {
+    if (idx >= 0 && idx < rows.length) {
+      const row = rows[idx];
+      recordsToMove.push({
+        tanggal: row.get("Tanggal") ?? "",
+        nama: normalizeName(row.get("Nama") ?? ""),
+        kelas: row.get("Kelas") ?? "",
+        statusAbsen: (row.get("Status_Absen") ?? "Hadir") as StatusAbsen,
+        nominalKas: Number(row.get("Nominal_Kas") ?? 0),
+        bulanTahun: row.get("Bulan_Tahun") ?? "",
+      });
+      rowsToDelete.push(row);
+    }
+  }
+
+  if (recordsToMove.length > 0) {
+    await targetSheet.addRows(
+      recordsToMove.map((r) => ({
+        Tanggal: r.tanggal,
+        Nama: r.nama,
+        Kelas: r.kelas,
+        Status_Absen: r.statusAbsen,
+        Nominal_Kas: r.nominalKas,
+        Bulan_Tahun: r.bulanTahun,
+      }))
+    );
+
+    for (const row of rowsToDelete) {
+      await row.delete();
+    }
+  }
+
+  invalidateCache(fromGen);
+  invalidateCache(targetGen);
 }

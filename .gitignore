@@ -44,4 +44,5 @@ next-env.d.ts
 
 # opencode skills (local only)
 .agents/
+.opencode/
 

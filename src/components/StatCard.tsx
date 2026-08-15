@@ -1,4 +1,10 @@
-export default function StatCard({ label, value }: { label: string; value: string }) {
+export default function StatCard({
+  label,
+  value,
+}: {
+  label: string;
+  value: string | number;
+}) {
   return (
     <div className="rounded-xl border-2 border-border bg-surface p-3.5">
       <p className="text-[10px] font-bold uppercase tracking-widest text-muted">{label}</p>
