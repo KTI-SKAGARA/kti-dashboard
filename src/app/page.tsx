@@ -152,7 +152,7 @@ export default function DashboardPage() {
   }, []);
 
   useEffect(() => {
-    loadGenList(); // eslint-disable-line react-hooks/set-state-in-effect
+    loadGenList();
   }, [loadGenList]);
 
   // Load filter options
@@ -205,16 +205,10 @@ export default function DashboardPage() {
       }
 
       setFilterOptions({ kelasList, bulanList, tanggalList });
-
-      // Default to latest bulan if none selected
-      if (bulanList.length > 0 && !filters.bulan) {
-        const latest = bulanList[bulanList.length - 1];
-        setFilters((f) => ({ ...f, bulan: latest }));
-      }
     } catch {
       setFilterOptions({ kelasList: [], bulanList: [], tanggalList: [] });
     }
-  }, [iterGens, filters.bulan]);
+  }, [iterGens]);
 
   // Load records
   const loadRecords = useCallback(async () => {
@@ -405,18 +399,16 @@ export default function DashboardPage() {
 
   // Reset page on filter change
   useEffect(() => {
-    setPage(1); // eslint-disable-line react-hooks/set-state-in-effect
+    setPage(1);
   }, [filters.gen, filters.kelas, filters.bulan, filters.tanggal, filters.status, filters.search]);
 
   // Load data on gen change or showLulus toggle
   useEffect(() => {
-    /* eslint-disable react-hooks/set-state-in-effect */
     if (iterGens.length > 0) {
       loadFilterOptions(filters.gen);
       loadRecords();
     }
-    /* eslint-enable react-hooks/set-state-in-effect */
-  }, [filters.gen, iterGens, loadFilterOptions, loadRecords, showLulus]);
+  }, [filters.gen, iterGens, loadFilterOptions, loadRecords]);
 
   // Delete single record handler
   const confirmDeleteRecord = async () => {
