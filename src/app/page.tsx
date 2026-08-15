@@ -3,7 +3,6 @@
 import { useEffect, useState, useCallback, useMemo } from "react";
 import {
   type Gen,
-  type FilterGen,
   type AttendanceRecord,
   type FilterState,
   type FilterOptions,
@@ -14,7 +13,6 @@ import {
 } from "@/types/attendance";
 import {
   getAttendanceRecords,
-  getFilterOptions,
   deleteAttendanceRecord,
   deleteBatchAttendanceRecords,
   updateAttendanceRecord,
@@ -81,11 +79,6 @@ export default function DashboardPage() {
   });
 
   const [allRecords, setAllRecords] = useState<TaggedRecord[]>([]);
-  const [filterOptions, setFilterOptions] = useState<FilterOptions>({
-    kelasList: [],
-    bulanList: [],
-    tanggalList: [],
-  });
   const [loading, setLoading] = useState(true);
   const [page, setPage] = useState(1);
 
@@ -155,62 +148,7 @@ export default function DashboardPage() {
     loadGenList();
   }, [loadGenList]);
 
-  // Load filter options
-  const loadFilterOptions = useCallback(async (genFilter: FilterGen) => {
-    try {
-      let bulanList: string[] = [];
-      let kelasList: string[] = [];
-      let tanggalList: string[] = [];
-
-      if (genFilter === "semua") {
-        const results = await Promise.all(
-          iterGens.map((g) => getFilterOptions(g))
-        );
-        const kelasSet = new Set<string>();
-        const bulanSet = new Set<string>();
-        const tanggalSet = new Set<string>();
-        for (const res of results) {
-          if (res.success && res.data) {
-            res.data.kelasList.forEach((k) => kelasSet.add(k));
-            res.data.bulanList.forEach((b) => bulanSet.add(b));
-            res.data.tanggalList?.forEach((t) => tanggalSet.add(t));
-          }
-        }
-        kelasList = Array.from(kelasSet).sort((a, b) => a.localeCompare(b, "id"));
-        bulanList = Array.from(bulanSet).sort((a, b) => {
-          const [am, ay] = a.split("-").map(Number);
-          const [bm, by] = b.split("-").map(Number);
-          return ay !== by ? ay - by : am - bm;
-        });
-        tanggalList = Array.from(tanggalSet).sort((a, b) => {
-          const [ad, am, ay] = a.split("/").map(Number);
-          const [bd, bm, by] = b.split("/").map(Number);
-          if (ay !== by) return by - ay;
-          if (am !== bm) return bm - am;
-          return bd - ad;
-        });
-      } else {
-        const res = await getFilterOptions(genFilter);
-        if (res.success && res.data) {
-          kelasList = res.data.kelasList;
-          bulanList = res.data.bulanList;
-          tanggalList = (res.data.tanggalList || []).sort((a, b) => {
-            const [ad, am, ay] = a.split("/").map(Number);
-            const [bd, bm, by] = b.split("/").map(Number);
-            if (ay !== by) return by - ay;
-            if (am !== bm) return bm - am;
-            return bd - ad;
-          });
-        }
-      }
-
-      setFilterOptions({ kelasList, bulanList, tanggalList });
-    } catch {
-      setFilterOptions({ kelasList: [], bulanList: [], tanggalList: [] });
-    }
-  }, [iterGens]);
-
-  // Load records
+  // Load records from data layer (fast & cached)
   const loadRecords = useCallback(async () => {
     setLoading(true);
     try {
@@ -244,6 +182,42 @@ export default function DashboardPage() {
       setLoading(false);
     }
   }, [filters.gen, iterGens]);
+
+  // Load data on Gen change or showLulus toggle
+  useEffect(() => {
+    if (iterGens.length > 0) {
+      loadRecords();
+    }
+  }, [filters.gen, iterGens, loadRecords]);
+
+  // In-memory Filter Options derived directly from allRecords (Instant 0ms calculation)
+  const filterOptions = useMemo<FilterOptions>(() => {
+    const kelasSet = new Set<string>();
+    const bulanSet = new Set<string>();
+    const tanggalSet = new Set<string>();
+
+    for (const r of allRecords) {
+      if (r.kelas) kelasSet.add(r.kelas);
+      if (r.bulanTahun) bulanSet.add(r.bulanTahun);
+      if (r.tanggal) tanggalSet.add(r.tanggal);
+    }
+
+    const kelasList = Array.from(kelasSet).sort((a, b) => a.localeCompare(b, "id"));
+    const bulanList = Array.from(bulanSet).sort((a, b) => {
+      const [am, ay] = a.split("-").map(Number);
+      const [bm, by] = b.split("-").map(Number);
+      return ay !== by ? ay - by : am - bm;
+    });
+    const tanggalList = Array.from(tanggalSet).sort((a, b) => {
+      const [ad, am, ay] = a.split("/").map(Number);
+      const [bd, bm, by] = b.split("/").map(Number);
+      if (ay !== by) return by - ay; // newest date first
+      if (am !== bm) return bm - am;
+      return bd - ad;
+    });
+
+    return { kelasList, bulanList, tanggalList };
+  }, [allRecords]);
 
   // Client-side filtering + sorting
   const records = useMemo(() => {
@@ -401,14 +375,6 @@ export default function DashboardPage() {
   useEffect(() => {
     setPage(1);
   }, [filters.gen, filters.kelas, filters.bulan, filters.tanggal, filters.status, filters.search]);
-
-  // Load data on gen change or showLulus toggle
-  useEffect(() => {
-    if (iterGens.length > 0) {
-      loadFilterOptions(filters.gen);
-      loadRecords();
-    }
-  }, [filters.gen, iterGens, loadFilterOptions, loadRecords]);
 
   // Delete single record handler
   const confirmDeleteRecord = async () => {
@@ -1056,7 +1022,6 @@ export default function DashboardPage() {
             <button
               onClick={() => {
                 loadRecords();
-                loadFilterOptions(filters.gen);
               }}
               className="btn btn-ghost min-h-[44px] min-w-[44px] px-2 py-2"
               title="Muat ulang data"
