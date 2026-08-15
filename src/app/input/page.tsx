@@ -22,7 +22,6 @@ import {
   normalizeName,
   formatRupiah,
   formatTanggalIndo,
-  detectGenFromKelas,
 } from "@/lib/utils";
 import { APP_NAME, SCHOOL_NAME, TOAST_DURATION } from "@/lib/constants";
 import {
@@ -34,7 +33,6 @@ import {
   User,
   ListChecks,
   PenLine,
-  AlertTriangle,
 } from "lucide-react";
 import Link from "next/link";
 import Toast from "@/components/Toast";
@@ -135,17 +133,6 @@ export default function InputPage() {
     if (gen) loadGenData(gen); // eslint-disable-line react-hooks/set-state-in-effect
   }, [gen, loadGenData]);
 
-  // Check if current Gen matches selected Class
-  const detectedGenForClass = useMemo(() => {
-    if (!kelas) return null;
-    return detectGenFromKelas(kelas);
-  }, [kelas]);
-
-  const isGenMismatch = useMemo(() => {
-    if (!detectedGenForClass || !gen) return false;
-    return detectedGenForClass !== gen;
-  }, [detectedGenForClass, gen]);
-
   // Students for selected class (quick mode)
   const studentsForKelas = useMemo(() => {
     if (!kelas) return [];
@@ -178,121 +165,125 @@ export default function InputPage() {
 
   // Quick mode stats
   const quickStats = useMemo(() => {
-    const hadir = quickStudents.filter((s) => s.checked);
-    const totalKas = hadir.reduce((sum, s) => sum + s.nominalKas, 0);
-    return { hadirCount: hadir.length, totalStudents: quickStudents.length, totalKas };
+    const total = quickStudents.length;
+    const hadir = quickStudents.filter((s) => s.checked).length;
+    const totalKas = quickStudents
+      .filter((s) => s.checked)
+      .reduce((sum, s) => sum + s.nominalKas, 0);
+    return { total, hadir, totalKas };
   }, [quickStudents]);
 
-  const handleStatusChange = (s: StatusAbsen) => {
-    setStatusAbsen(s);
-    if (s === "Hadir") {
+  // Autocomplete suggestions for normal mode
+  const filteredSuggestions = useMemo(() => {
+    if (!nama || nama.length < 2) return [];
+    const query = nama.toUpperCase();
+    return existingStudents.filter(
+      (s) => s.nama.includes(query) && (!kelas || s.kelas === kelas)
+    );
+  }, [nama, kelas, existingStudents]);
+
+  // Handlers for normal mode
+  const handleStatusChange = (newStatus: StatusAbsen) => {
+    setStatusAbsen(newStatus);
+    if (newStatus === "Hadir") {
       setBayarKas(true);
+      setNominalKas(`${KAS_RUTIN_DEFAULT}`);
+    } else if (newStatus === "Alfa") {
+      setBayarKas(false);
+      setNominalKas("0");
     } else {
       setBayarKas(false);
+      setNominalKas("0");
     }
+  };
+
+  const handleBayarKasToggle = (checked: boolean) => {
+    setBayarKas(checked);
+    if (checked) {
+      setNominalKas(`${KAS_RUTIN_DEFAULT}`);
+    } else {
+      setNominalKas("0");
+    }
+  };
+
+  const handleSelectSuggestion = (student: StudentOption) => {
+    setNama(student.nama);
+    if (student.kelas) {
+      setKelas(student.kelas);
+    }
+    setShowSuggestions(false);
+    if (errors.nama) setErrors((prev) => ({ ...prev, nama: "" }));
+    if (errors.kelas) setErrors((prev) => ({ ...prev, kelas: "" }));
   };
 
   const handleKelasChange = (newKelas: string) => {
     setKelas(newKelas);
     if (errors.kelas) setErrors((prev) => ({ ...prev, kelas: "" }));
-
-    const detected = detectGenFromKelas(newKelas);
-    if (detected && detected !== gen && activeGens.includes(detected)) {
-      // Auto switch or alert
-      setGen(detected);
-    }
+    setCheckedMap({});
+    setKasMap({});
   };
 
-  const handleNamaChange = (val: string) => {
-    const upperVal = val.toUpperCase();
-    setNama(upperVal);
-    setShowSuggestions(true);
-    if (errors.nama) setErrors((prev) => ({ ...prev, nama: "" }));
-
-    const matched = existingStudents.find(
-      (s) => normalizeName(s.nama) === upperVal.trim()
-    );
-    if (matched && matched.kelas) {
-      setKelas(matched.kelas);
-      if (errors.kelas) setErrors((prev) => ({ ...prev, kelas: "" }));
-      const detected = detectGenFromKelas(matched.kelas);
-      if (detected && detected !== gen && activeGens.includes(detected)) {
-        setGen(detected);
-      }
-    }
+  // Quick mode handlers
+  const toggleStudentCheck = (studentNama: string) => {
+    setCheckedMap((prev) => ({
+      ...prev,
+      [studentNama]: !prev[studentNama],
+    }));
   };
 
-  const suggestions = useMemo(() => {
-    if (!nama.trim()) return [];
-    const q = nama.toLowerCase();
-    return existingStudents
-      .filter((s) => s.nama.toLowerCase().includes(q))
-      .slice(0, 8);
-  }, [existingStudents, nama]);
-
-  const pickSuggestion = (s: StudentOption) => {
-    setNama(s.nama);
-    setKelas(s.kelas);
-    setShowSuggestions(false);
-    if (errors.nama || errors.kelas) setErrors((prev) => ({ ...prev, nama: "", kelas: "" }));
-
-    const detected = detectGenFromKelas(s.kelas);
-    if (detected && detected !== gen && activeGens.includes(detected)) {
-      setGen(detected);
-    }
+  const setStudentKas = (studentNama: string, amount: number) => {
+    setKasMap((prev) => ({
+      ...prev,
+      [studentNama]: amount,
+    }));
   };
 
-  const validate = (): boolean => {
-    const e: Record<string, string> = {};
-    if (!gen) e.gen = "Pilih gen terlebih dahulu.";
-    if (!nama.trim()) e.nama = "Nama siswa wajib diisi.";
-    if (!kelas.trim()) e.kelas = "Pilih kelas terlebih dahulu.";
-    if (kasRules.wajib && !bayarKas) {
-      e.kas = "Anggota yang hadir wajib membayar kas.";
-    } else if (bayarKas) {
-      const kas = Number(nominalKas);
-      if (nominalKas === "" || isNaN(kas) || kas < 0) {
-        e.kas = "Nominal kas harus berupa angka ≥ 0.";
-      }
+  const toggleAllStudents = (checked: boolean) => {
+    const next: Record<string, boolean> = {};
+    for (const s of studentsForKelas) {
+      next[s.nama] = checked;
     }
-    setErrors(e);
-    return Object.keys(e).length === 0;
+    setCheckedMap(next);
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  // Validation & Submit for normal mode
+  const validateNormal = (): boolean => {
+    const errs: Record<string, string> = {};
+    if (!gen) errs.gen = "Pilih Gen terlebih dahulu.";
+    if (!kelas) errs.kelas = "Pilih kelas.";
+    if (!nama.trim()) errs.nama = "Nama siswa wajib diisi.";
+    if (!tanggal) errs.tanggal = "Tanggal wajib diisi.";
+    if (bayarKas && (!nominalKas || Number(nominalKas) <= 0)) {
+      errs.nominalKas = "Nominal kas harus lebih dari 0 jika bayar kas dicentang.";
+    }
+    setErrors(errs);
+    return Object.keys(errs).length === 0;
+  };
+
+  const handleNormalSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!validate()) return;
+    if (!validateNormal()) return;
 
     setSubmitting(true);
-    setToast(null);
-
-    const savedNama = normalizeName(nama);
-
     const res = await submitAttendanceRecord({
       gen,
-      kelas: kelas.trim(),
-      nama: savedNama,
-      tanggal: parseISOTanggal(tanggal),
+      nama: normalizeName(nama),
+      kelas,
       statusAbsen,
       nominalKas: bayarKas ? Number(nominalKas) : 0,
+      tanggal: parseISOTanggal(tanggal),
     });
-
     setSubmitting(false);
 
     if (res.success) {
       setToast({
         type: "success",
-        message: `Data ${savedNama} (${kelas}) berhasil disimpan!`,
+        message: `Data absensi ${normalizeName(nama)} (${kelas}) berhasil disimpan ke Gen ${gen}!`,
       });
-
       setNama("");
-      setKelas("");
-      setTanggal(getTodayISO());
       setStatusAbsen("Hadir");
       setBayarKas(true);
       setNominalKas(`${KAS_RUTIN_DEFAULT}`);
-      setErrors({});
-
       loadGenData(gen);
     } else {
       setToast({
@@ -304,47 +295,31 @@ export default function InputPage() {
     setTimeout(() => setToast(null), TOAST_DURATION);
   };
 
-  const toggleQuickStudent = (idx: number) => {
-    const student = quickStudents[idx];
-    if (!student) return;
-    setCheckedMap((prev) => ({ ...prev, [student.nama]: !prev[student.nama] }));
-    if (errors.quick) setErrors((prev) => ({ ...prev, quick: "" }));
-  };
-
-  const updateQuickKas = (idx: number, val: number) => {
-    const student = quickStudents[idx];
-    if (!student) return;
-    setKasMap((prev) => ({ ...prev, [student.nama]: val }));
-  };
-
-  const toggleAllQuick = (checked: boolean) => {
-    setCheckedMap((prev) => {
-      const next = { ...prev };
-      for (const s of quickStudents) {
-        next[s.nama] = checked;
-      }
-      return next;
-    });
-    if (errors.quick) setErrors((prev) => ({ ...prev, quick: "" }));
-  };
-
+  // Quick mode submit
   const handleQuickSubmit = async () => {
-    const hadir = quickStudents.filter((s) => s.checked);
-    if (hadir.length === 0) {
-      setErrors({ quick: "Pilih minimal 1 siswa yang hadir." });
+    if (!gen) {
+      setErrors({ gen: "Pilih Gen terlebih dahulu." });
       return;
     }
-    if (!kelas.trim()) {
-      setErrors({ quick: "Pilih kelas terlebih dahulu." });
+    if (!kelas) {
+      setErrors({ kelas: "Pilih kelas terlebih dahulu." });
+      return;
+    }
+
+    const hadir = quickStudents.filter((s) => s.checked);
+    if (hadir.length === 0) {
+      setToast({
+        type: "error",
+        message: "Pilih minimal 1 siswa yang hadir.",
+      });
+      setTimeout(() => setToast(null), TOAST_DURATION);
       return;
     }
 
     setSubmitting(true);
-    setToast(null);
-
     const res = await submitBulkAttendance(
       gen,
-      kelas.trim(),
+      kelas,
       parseISOTanggal(tanggal),
       hadir.map((s) => ({
         nama: s.nama,
@@ -359,7 +334,7 @@ export default function InputPage() {
       const count = res.data?.saved ?? hadir.length;
       setToast({
         type: "success",
-        message: `${count} data absensi berhasil disimpan!`,
+        message: `${count} data absensi berhasil disimpan ke Gen ${gen}!`,
       });
       setCheckedMap({});
       setKasMap({});
@@ -439,22 +414,21 @@ export default function InputPage() {
 
       {/* Shared: Gen + Kelas + Tanggal */}
       <div className="card mt-4 p-6 space-y-5 sm:p-8">
-        {/* Visual Gen Selector */}
+        {/* Visual Gen Selector (Angkatan Komunitas KTI) */}
         <div>
           <div className="flex items-center justify-between">
             <label className="label !mb-1.5 flex items-center gap-1.5">
-              <span>Target Generasi / Angkatan</span>
+              <span>Target Generasi / Angkatan Komunitas</span>
               <span className="text-danger">*</span>
             </label>
             <span className="text-[11px] font-semibold text-muted">
-              Pilih Gen sebelum menyimpan
+              Pilih Angkatan Komunitas
             </span>
           </div>
 
           <div className="grid grid-cols-3 gap-2">
             {activeGens.map((g) => {
               const isSelected = gen === g;
-              const gradeHint = g === "10" ? "Kelas X" : g === "11" ? "Kelas XI" : g === "12" ? "Kelas XII" : `Angkatan ${g}`;
               return (
                 <button
                   key={g}
@@ -470,7 +444,7 @@ export default function InputPage() {
                     Gen {g}
                   </span>
                   <span className="text-[10px] font-medium text-muted">
-                    {gradeHint}
+                    Angkatan {g}
                   </span>
                 </button>
               );
@@ -485,29 +459,10 @@ export default function InputPage() {
           )}
         </div>
 
-        {/* Gen & Class Mismatch Alert */}
-        {isGenMismatch && (
-          <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border-2 border-amber-500/50 bg-amber-500/10 p-3.5 text-xs text-amber-900 dark:text-amber-200">
-            <div className="flex items-center gap-2">
-              <AlertTriangle className="h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" />
-              <span>
-                Kelas <strong>{kelas}</strong> biasanya untuk <strong>Gen {detectedGenForClass}</strong> (saat ini Gen {gen}).
-              </span>
-            </div>
-            <button
-              type="button"
-              onClick={() => handleGenChange(detectedGenForClass!)}
-              className="btn btn-primary min-h-[36px] px-3 py-1.5 text-xs font-bold whitespace-nowrap"
-            >
-              Pindah ke Gen {detectedGenForClass}
-            </button>
-          </div>
-        )}
-
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <div>
             <label htmlFor="input-kelas" className="label">
-              Kelas <span className="text-danger">*</span>
+              Kelas Siswa <span className="text-danger">*</span>
             </label>
             <select
               id="input-kelas"
@@ -518,7 +473,7 @@ export default function InputPage() {
               onChange={(e) => handleKelasChange(e.target.value)}
             >
               <option value="">-- Pilih Kelas --</option>
-              <optgroup label="Kelas X (Gen 10)">
+              <optgroup label="Kelas X (Sepuluh)">
                 {availableClasses
                   .filter((k) => k.startsWith("X "))
                   .map((k) => (
@@ -527,7 +482,7 @@ export default function InputPage() {
                     </option>
                   ))}
               </optgroup>
-              <optgroup label="Kelas XI (Gen 11)">
+              <optgroup label="Kelas XI (Sebelas)">
                 {availableClasses
                   .filter((k) => k.startsWith("XI "))
                   .map((k) => (
@@ -536,7 +491,7 @@ export default function InputPage() {
                     </option>
                   ))}
               </optgroup>
-              <optgroup label="Kelas XII (Gen 12)">
+              <optgroup label="Kelas XII (Dua Belas)">
                 {availableClasses
                   .filter((k) => k.startsWith("XII "))
                   .map((k) => (
@@ -551,7 +506,10 @@ export default function InputPage() {
                 <optgroup label="Kelas Lainnya">
                   {availableClasses
                     .filter(
-                      (k) => !k.startsWith("X ") && !k.startsWith("XI ") && !k.startsWith("XII ")
+                      (k) =>
+                        !k.startsWith("X ") &&
+                        !k.startsWith("XI ") &&
+                        !k.startsWith("XII ")
                     )
                     .map((k) => (
                       <option key={k} value={k}>
@@ -562,7 +520,7 @@ export default function InputPage() {
               )}
             </select>
             {errors.kelas && (
-              <p className="mt-1 flex items-center gap-1 text-xs font-semibold text-danger">
+              <p className="mt-1.5 flex items-center gap-1 text-xs font-semibold text-danger">
                 <AlertCircle className="h-3 w-3" />
                 {errors.kelas}
               </p>
@@ -571,187 +529,185 @@ export default function InputPage() {
 
           <div>
             <label htmlFor="input-tanggal" className="label">
-              Tanggal <span className="text-danger">*</span>
+              Tanggal Presensi <span className="text-danger">*</span>
             </label>
             <input
               id="input-tanggal"
               type="date"
-              className="input"
+              className={`input ${
+                errors.tanggal ? "!border-danger focus:!ring-danger/20" : ""
+              }`}
               value={tanggal}
-              onChange={(e) => setTanggal(e.target.value)}
+              onChange={(e) => {
+                setTanggal(e.target.value);
+                if (errors.tanggal) setErrors((prev) => ({ ...prev, tanggal: "" }));
+              }}
             />
+            {errors.tanggal && (
+              <p className="mt-1.5 flex items-center gap-1 text-xs font-semibold text-danger">
+                <AlertCircle className="h-3 w-3" />
+                {errors.tanggal}
+              </p>
+            )}
           </div>
         </div>
 
-        {/* ---- NORMAL MODE ---- */}
+        {/* MODE: NORMAL */}
         {mode === "normal" && (
-          <form onSubmit={handleSubmit} className="space-y-5">
-            <div>
-              <div className="flex items-center justify-between">
-                <label htmlFor="input-nama" className="label !mb-0">
-                  Nama Lengkap Siswa <span className="text-danger">*</span>
-                </label>
-                {existingStudents.length > 0 && (
-                  <span className="flex items-center gap-1 text-[10px] font-bold uppercase tracking-widest text-muted">
-                    <User className="h-3 w-3" /> {existingStudents.length} siswa terdaftar di Gen {gen}
-                  </span>
-                )}
-              </div>
-
-              <div className="relative mt-1.5">
+          <form onSubmit={handleNormalSubmit} className="space-y-5 pt-2 border-t-2 border-border">
+            {/* Nama Siswa + Autocomplete */}
+            <div className="relative">
+              <label htmlFor="input-nama" className="label">
+                Nama Siswa <span className="text-danger">*</span>
+              </label>
+              <div className="relative">
+                <User className="absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted" />
                 <input
                   id="input-nama"
                   type="text"
-                  className={`input font-medium uppercase ${
+                  placeholder="Ketik nama siswa..."
+                  className={`input pl-10 uppercase ${
                     errors.nama ? "!border-danger focus:!ring-danger/20" : ""
                   }`}
-                  placeholder="Ketik nama siswa..."
                   value={nama}
-                  onChange={(e) => handleNamaChange(e.target.value)}
+                  onChange={(e) => {
+                    setNama(e.target.value);
+                    setShowSuggestions(true);
+                    if (errors.nama) setErrors((prev) => ({ ...prev, nama: "" }));
+                  }}
                   onFocus={() => setShowSuggestions(true)}
-                  onBlur={() => setTimeout(() => setShowSuggestions(false), 150)}
+                  onBlur={() => setTimeout(() => setShowSuggestions(false), 200)}
                   autoComplete="off"
                 />
-
-                {showSuggestions && suggestions.length > 0 && (
-                  <ul className="absolute z-10 mt-1 max-h-64 w-full overflow-auto rounded-xl border-2 border-border bg-surface py-1 hard-shadow-sm">
-                    {suggestions.map((s) => (
-                      <li key={`${s.nama}-${s.kelas}`}>
-                        <button
-                          type="button"
-                          onClick={() => pickSuggestion(s)}
-                          className="flex w-full items-center justify-between gap-2 px-3 py-2 text-left hover:bg-accent/10"
-                        >
-                          <span className="truncate text-sm font-medium uppercase text-foreground">
-                            {s.nama}
-                          </span>
-                          <span className="shrink-0 text-xs font-semibold text-muted">{s.kelas}</span>
-                        </button>
-                      </li>
-                    ))}
-                  </ul>
-                )}
               </div>
 
-              {errors.nama ? (
-                <p className="mt-1 flex items-center gap-1 text-xs font-semibold text-danger">
+              {/* Suggestions dropdown */}
+              {showSuggestions && filteredSuggestions.length > 0 && (
+                <div className="absolute z-20 mt-1 max-h-48 w-full overflow-y-auto rounded-xl border-2 border-border bg-surface p-1 shadow-lg">
+                  {filteredSuggestions.map((s) => (
+                    <button
+                      key={`${s.kelas}-${s.nama}`}
+                      type="button"
+                      className="flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-sm hover:bg-surface-2 transition-colors"
+                      onMouseDown={() => handleSelectSuggestion(s)}
+                    >
+                      <span className="font-semibold text-foreground">{s.nama}</span>
+                      <span className="text-xs font-bold text-muted">{s.kelas}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+
+              {errors.nama && (
+                <p className="mt-1.5 flex items-center gap-1 text-xs font-semibold text-danger">
                   <AlertCircle className="h-3 w-3" />
                   {errors.nama}
-                </p>
-              ) : (
-                <p className="mt-1 text-[11px] font-medium text-muted">
-                  Nama otomatis dikonversi ke huruf kapital. Nama siswa yang sudah pernah
-                  tercatat akan muncul sebagai saran.
                 </p>
               )}
             </div>
 
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-              <div>
-                <label htmlFor="input-status" className="label">
-                  Status Kehadiran <span className="text-danger">*</span>
+            {/* Status Absen */}
+            <div>
+              <label className="label">
+                Status Kehadiran <span className="text-danger">*</span>
+              </label>
+              <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                {(["Hadir", "Sakit", "Izin", "Alfa"] as StatusAbsen[]).map((st) => {
+                  const isSelected = statusAbsen === st;
+                  const colorMap = {
+                    Hadir: "border-emerald-500 bg-emerald-500/15 text-emerald-700 dark:text-emerald-300",
+                    Sakit: "border-amber-500 bg-amber-500/15 text-amber-700 dark:text-amber-300",
+                    Izin: "border-accent bg-accent/15 text-accent",
+                    Alfa: "border-danger bg-danger/15 text-danger",
+                  };
+                  return (
+                    <button
+                      key={st}
+                      type="button"
+                      onClick={() => handleStatusChange(st)}
+                      className={`flex min-h-[44px] items-center justify-center rounded-xl border-2 font-display text-sm font-extrabold uppercase tracking-wide transition-all ${
+                        isSelected
+                          ? `${colorMap[st]} hard-shadow-sm`
+                          : "border-border bg-surface-2 text-muted hover:border-border-focus"
+                      }`}
+                    >
+                      {st}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Bayar Kas */}
+            <div className="rounded-xl border-2 border-border bg-surface-2 p-4 space-y-3">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-xs font-extrabold uppercase tracking-wide text-foreground">
+                    Iuran Kas Rutin
+                  </p>
+                  <p className="mt-0.5 text-xs text-muted">{kasRules.catatan}</p>
+                </div>
+                <label className="relative inline-flex cursor-pointer items-center">
+                  <input
+                    type="checkbox"
+                    checked={bayarKas}
+                    onChange={(e) => handleBayarKasToggle(e.target.checked)}
+                    className="peer sr-only"
+                  />
+                  <div className="peer h-6 w-11 rounded-full bg-border peer-checked:bg-accent peer-checked:after:translate-x-full peer-checked:after:border-white after:absolute after:left-[2px] after:top-[2px] after:h-5 after:w-5 after:rounded-full after:border after:border-gray-300 after:bg-white after:transition-all"></div>
                 </label>
-                <select
-                  id="input-status"
-                  className="select"
-                  value={statusAbsen}
-                  onChange={(e) => handleStatusChange(e.target.value as StatusAbsen)}
-                >
-                  {(["Hadir", "Sakit", "Izin", "Alfa"] as StatusAbsen[]).map((s) => (
-                    <option key={s} value={s}>
-                      {s}
-                    </option>
-                  ))}
-                </select>
               </div>
 
-              <div>
-                <span className="label">Kas Rutin</span>
-                <div
-                  className={`rounded-xl border-2 p-3.5 ${
-                    errors.kas ? "border-danger" : "border-border"
-                  }`}
-                >
-                  <label
-                    className={`flex items-center gap-3 ${
-                      statusAbsen === "Alfa" ? "cursor-not-allowed opacity-50" : "cursor-pointer"
-                    }`}
-                  >
-                    <input
-                      type="checkbox"
-                      checked={bayarKas}
-                      disabled={statusAbsen === "Alfa"}
-                      onChange={(e) => {
-                        setBayarKas(e.target.checked);
-                        if (errors.kas) setErrors((prev) => ({ ...prev, kas: "" }));
-                      }}
-                      className="h-4 w-4 rounded accent-accent"
-                    />
-                    <span className="text-sm font-semibold text-foreground">
-                      Bayar kas rutin ({formatRupiah(KAS_RUTIN_DEFAULT)})
-                    </span>
+              {bayarKas && (
+                <div className="pt-2 border-t border-border/50">
+                  <label htmlFor="input-kas" className="label text-xs">
+                    Nominal Kas (Rp)
                   </label>
+                  <input
+                    id="input-kas"
+                    type="number"
+                    min="0"
+                    step="500"
+                    className="input tabular-nums font-bold"
+                    value={nominalKas}
+                    onChange={(e) => setNominalKas(e.target.value)}
+                  />
+                </div>
+              )}
+            </div>
 
-                  {bayarKas && (
-                    <div className="mt-3">
-                      <label htmlFor="input-kas" className="label !mb-0 !text-[11px]">
-                        Nominal (Rp)
-                      </label>
-                      <input
-                        id="input-kas"
-                        type="number"
-                        min="0"
-                        step="500"
-                        className="input mt-1 tabular-nums"
-                        value={nominalKas}
-                        onChange={(e) => {
-                          setNominalKas(e.target.value);
-                          if (errors.kas) setErrors((prev) => ({ ...prev, kas: "" }));
-                        }}
-                      />
-                    </div>
-                  )}
-
-                  <p className="mt-2 text-[11px] font-medium text-muted">{kasRules.catatan}</p>
-                  {errors.kas && (
-                    <p className="mt-1 flex items-center gap-1 text-xs font-bold text-danger">
-                      <AlertCircle className="h-3 w-3" />
-                      {errors.kas}
-                    </p>
-                  )}
+            {/* Live Target Confirmation Card */}
+            {gen && (
+              <div className="rounded-xl border-2 border-accent/40 bg-accent/5 p-3.5 text-xs">
+                <p className="text-[10px] font-bold uppercase tracking-wider text-accent">
+                  Target Konfirmasi Simpan:
+                </p>
+                <div className="mt-1 flex flex-wrap items-center gap-1.5 font-bold text-foreground">
+                  <span className="badge bg-accent text-white">GEN {gen}</span>
+                  <span>•</span>
+                  <span>{kelas || "(Pilih Kelas)"}</span>
+                  <span>•</span>
+                  <span>{nama ? normalizeName(nama) : "(Ketik Nama)"}</span>
+                  <span>•</span>
+                  <span className="text-muted">{formatTanggalIndo(parseISOTanggal(tanggal))}</span>
                 </div>
               </div>
-            </div>
+            )}
 
-            {/* Live Preview Card */}
-            <div className="rounded-xl border-2 border-border bg-surface-2 p-3.5 text-xs">
-              <p className="font-bold uppercase tracking-wider text-muted text-[10px]">
-                Konfirmasi Target Penyimpanan:
-              </p>
-              <div className="mt-1.5 flex flex-wrap items-center gap-2">
-                <span className="badge bg-accent text-white font-extrabold px-2 py-0.5">
-                  GEN {gen || "?"}
-                </span>
-                <span className="badge bg-surface border-2 border-border font-bold text-foreground">
-                  {kelas || "Belum pilih kelas"}
-                </span>
-                <span className="badge bg-surface border-2 border-border font-bold uppercase text-foreground">
-                  {nama || "Belum isi nama"}
-                </span>
-                <span className="text-muted font-medium">
-                  • {formatTanggalIndo(parseISOTanggal(tanggal))}
-                </span>
-                <span className="text-muted font-medium">
-                  • {statusAbsen} ({bayarKas ? formatRupiah(Number(nominalKas) || 0) : "Rp 0"})
-                </span>
-              </div>
-            </div>
-
-            <div className="flex items-center gap-3 pt-1">
+            {/* Action Buttons */}
+            <div className="flex items-center justify-end gap-3 pt-3">
+              <button
+                type="button"
+                onClick={resetForm}
+                className="btn btn-secondary min-h-[44px] px-4 py-2 text-sm"
+              >
+                <RotateCcw className="h-4 w-4" />
+                Reset
+              </button>
               <button
                 type="submit"
                 disabled={submitting}
-                className="btn btn-primary flex-1 min-h-[48px] py-3 text-sm"
+                className="btn btn-primary min-h-[44px] px-6 py-2 text-sm font-bold"
               >
                 {submitting ? (
                   <Loader2 className="h-4 w-4 animate-spin" />
@@ -760,162 +716,132 @@ export default function InputPage() {
                 )}
                 {submitting ? "Menyimpan..." : "Simpan Data"}
               </button>
-              <button
-                type="button"
-                onClick={resetForm}
-                className="btn btn-secondary min-h-[48px] px-4 py-3 text-sm"
-                disabled={submitting}
-              >
-                <RotateCcw className="h-4 w-4" />
-                Reset
-              </button>
             </div>
           </form>
         )}
 
-        {/* ---- QUICK MODE ---- */}
+        {/* MODE: CEPAT (BULK) */}
         {mode === "cepat" && (
-          <div className="space-y-4">
-            {!gen ? (
-              <div className="rounded-xl border-2 border-dashed border-border bg-surface-2 py-10 text-center">
+          <div className="space-y-5 pt-2 border-t-2 border-border">
+            {!kelas ? (
+              <div className="py-8 text-center text-xs text-muted">
                 <ListChecks className="mx-auto h-8 w-8 text-muted" />
-                <p className="mt-2 text-sm font-semibold text-muted">
-                  Pilih gen untuk melanjutkan.
-                </p>
-              </div>
-            ) : !kelas ? (
-              <div className="rounded-xl border-2 border-dashed border-border bg-surface-2 py-10 text-center">
-                <ListChecks className="mx-auto h-8 w-8 text-muted" />
-                <p className="mt-2 text-sm font-semibold text-muted">
-                  Pilih kelas untuk menampilkan daftar siswa.
+                <p className="mt-2 font-medium">
+                  Pilih kelas di atas untuk memuat daftar siswa di Gen {gen}.
                 </p>
               </div>
             ) : quickStudents.length === 0 ? (
-              <div className="rounded-xl border-2 border-dashed border-border bg-surface-2 py-10 text-center">
-                <User className="mx-auto h-8 w-8 text-muted" />
-                <p className="mt-2 text-sm font-semibold text-muted">
-                  Belum ada data siswa di kelas <span className="font-bold text-foreground">{kelas}</span> (Gen {gen}).
+              <div className="py-8 text-center text-xs text-muted">
+                <AlertCircle className="mx-auto h-8 w-8 text-muted" />
+                <p className="mt-2 font-medium">
+                  Belum ada riwayat siswa untuk kelas <strong>{kelas}</strong> di Gen {gen}.
                 </p>
-                <p className="mt-1 text-xs font-medium text-muted">
-                  Input manual dulu untuk kelas ini di mode &quot;Input Manual&quot;.
+                <p className="mt-1">
+                  Gunakan <strong>Input Manual</strong> terlebih dahulu untuk mendaftarkan siswa baru.
                 </p>
               </div>
             ) : (
               <>
-                {/* Summary bar */}
-                <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border-2 border-border bg-surface-2 px-4 py-2.5">
-                  <div className="flex flex-wrap items-center gap-3 text-xs font-semibold">
-                    <span className="badge bg-accent text-white font-extrabold px-2 py-0.5">
-                      GEN {gen}
-                    </span>
-                    <span className="text-muted">
-                      <span className="font-bold text-foreground">{quickStats.totalStudents}</span> siswa
-                    </span>
-                    <span className="text-muted">
-                      Hadir: <span className="font-bold text-emerald-600 dark:text-emerald-300">{quickStats.hadirCount}</span>
-                    </span>
-                    <span className="text-muted">
-                      Kas: <span className="font-bold text-foreground">{formatRupiah(quickStats.totalKas)}</span>
-                    </span>
+                {/* Header & Quick stats */}
+                <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border-2 border-border bg-surface-2 p-4">
+                  <div>
+                    <p className="text-xs font-bold uppercase text-foreground">
+                      Daftar Siswa {kelas} (Gen {gen})
+                    </p>
+                    <p className="text-xs text-muted">
+                      {quickStats.hadir} dari {quickStats.total} siswa hadir • Total Kas:{" "}
+                      <strong className="text-accent">{formatRupiah(quickStats.totalKas)}</strong>
+                    </p>
                   </div>
-                  <div className="flex items-center gap-1">
+                  <div className="flex items-center gap-2">
                     <button
-                      onClick={() => toggleAllQuick(true)}
-                      className="btn btn-ghost min-h-[44px] px-3 py-2 text-xs"
+                      type="button"
+                      onClick={() => toggleAllStudents(true)}
+                      className="btn btn-secondary min-h-[36px] px-3 py-1.5 text-xs font-bold"
                     >
-                      Centang Semua
+                      Hadir Semua
                     </button>
                     <button
-                      onClick={() => toggleAllQuick(false)}
-                      className="btn btn-ghost min-h-[44px] px-3 py-2 text-xs"
+                      type="button"
+                      onClick={() => toggleAllStudents(false)}
+                      className="btn btn-ghost min-h-[36px] px-3 py-1.5 text-xs font-bold"
                     >
-                      Batal
+                      Kosongkan
                     </button>
                   </div>
                 </div>
 
-                {/* Checklist table */}
-                <div className="overflow-x-auto rounded-xl border-2 border-border">
-                  <table className="data-table">
-                    <thead>
-                      <tr>
-                        <th className="w-10"></th>
-                        <th>Nama</th>
-                        <th className="w-28 text-right">Kas (Rp)</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {quickStudents.map((s, idx) => (
-                        <tr
-                          key={s.nama}
-                          className={s.checked ? "bg-emerald-500/10" : ""}
+                {/* Quick students checklist */}
+                <div className="space-y-2 max-h-96 overflow-y-auto pr-1">
+                  {quickStudents.map((s) => (
+                    <div
+                      key={s.nama}
+                      onClick={() => toggleStudentCheck(s.nama)}
+                      className={`flex cursor-pointer items-center justify-between rounded-xl border-2 p-3 transition-all ${
+                        s.checked
+                          ? "border-emerald-500/50 bg-emerald-500/10 text-foreground hard-shadow-sm"
+                          : "border-border bg-surface hover:bg-surface-2 text-muted"
+                      }`}
+                    >
+                      <div className="flex items-center gap-3">
+                        <input
+                          type="checkbox"
+                          checked={s.checked}
+                          onChange={() => {}} // handled by parent div
+                          className="h-4 w-4 rounded accent-emerald-600"
+                        />
+                        <span className="font-semibold text-sm uppercase text-foreground">
+                          {s.nama}
+                        </span>
+                      </div>
+
+                      {s.checked && (
+                        <div
+                          className="flex items-center gap-1.5"
+                          onClick={(e) => e.stopPropagation()}
                         >
-                          <td className="text-center">
-                            <input
-                              type="checkbox"
-                              checked={s.checked}
-                              onChange={() => toggleQuickStudent(idx)}
-                              className="h-5 w-5 rounded accent-accent"
-                            />
-                          </td>
-                          <td className="font-medium uppercase text-foreground">
-                            {s.nama}
-                          </td>
-                          <td className="text-right">
-                            {s.checked ? (
-                              <input
-                                type="number"
-                                min="0"
-                                step="500"
-                                value={s.nominalKas}
-                                onChange={(e) =>
-                                  updateQuickKas(idx, Number(e.target.value) || 0)
-                                }
-                                className="w-24 rounded-lg border-2 border-border bg-surface px-2 py-1.5 text-right text-xs tabular-nums text-foreground focus:border-accent focus:ring-1 focus:ring-accent"
-                              />
-                            ) : (
-                              <span className="text-xs text-muted">—</span>
-                            )}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                          <span className="text-xs font-bold text-muted">Kas:</span>
+                          <input
+                            type="number"
+                            min="0"
+                            step="500"
+                            className="input !h-8 !w-24 px-2 py-1 text-right text-xs font-bold tabular-nums"
+                            value={s.nominalKas}
+                            onChange={(e) =>
+                              setStudentKas(s.nama, Number(e.target.value) || 0)
+                            }
+                          />
+                        </div>
+                      )}
+                    </div>
+                  ))}
                 </div>
 
-                {/* Live Target Card */}
-                <div className="rounded-xl border-2 border-border bg-surface-2 p-3.5 text-xs">
-                  <p className="font-bold uppercase tracking-wider text-muted text-[10px]">
-                    Konfirmasi Penyimpanan Mode Cepat:
+                {/* Live Target Confirmation Card */}
+                <div className="rounded-xl border-2 border-accent/40 bg-accent/5 p-3.5 text-xs">
+                  <p className="text-[10px] font-bold uppercase tracking-wider text-accent">
+                    Target Konfirmasi Mode Cepat:
                   </p>
-                  <div className="mt-1.5 flex flex-wrap items-center gap-2">
-                    <span className="badge bg-accent text-white font-extrabold px-2 py-0.5">
-                      GEN {gen}
-                    </span>
-                    <span className="badge bg-surface border-2 border-border font-bold text-foreground">
-                      {kelas}
-                    </span>
-                    <span className="text-muted font-medium">
-                      • {formatTanggalIndo(parseISOTanggal(tanggal))}
-                    </span>
-                    <span className="text-muted font-medium">
-                      • {quickStats.hadirCount} siswa hadir (Total Kas {formatRupiah(quickStats.totalKas)})
-                    </span>
-                  </div>
+                  <p className="mt-1 font-bold text-foreground">
+                    Menyimpan <strong className="text-accent">{quickStats.hadir} siswa</strong> ke <strong>GEN {gen}</strong> • Kelas <strong>{kelas}</strong> • Tanggal <strong>{formatTanggalIndo(parseISOTanggal(tanggal))}</strong>
+                  </p>
                 </div>
 
-                {errors.quick && (
-                  <p className="flex items-center gap-1 text-xs font-bold text-danger">
-                    <AlertCircle className="h-3 w-3" />
-                    {errors.quick}
-                  </p>
-                )}
-
-                <div className="flex items-center gap-3 pt-1">
+                {/* Action Buttons */}
+                <div className="flex items-center justify-end gap-3 pt-3">
                   <button
+                    type="button"
+                    onClick={resetForm}
+                    className="btn btn-secondary min-h-[44px] px-4 py-2 text-sm"
+                  >
+                    <RotateCcw className="h-4 w-4" />
+                    Reset
+                  </button>
+                  <button
+                    type="button"
                     onClick={handleQuickSubmit}
-                    disabled={submitting || quickStats.hadirCount === 0}
-                    className="btn btn-primary flex-1 min-h-[48px] py-3 text-sm"
+                    disabled={submitting || quickStats.hadir === 0}
+                    className="btn btn-primary min-h-[44px] px-6 py-2 text-sm font-bold"
                   >
                     {submitting ? (
                       <Loader2 className="h-4 w-4 animate-spin" />
@@ -924,16 +850,7 @@ export default function InputPage() {
                     )}
                     {submitting
                       ? "Menyimpan..."
-                      : `Simpan ${quickStats.hadirCount} Data Absensi`}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={resetForm}
-                    className="btn btn-secondary min-h-[48px] px-4 py-3 text-sm"
-                    disabled={submitting}
-                  >
-                    <RotateCcw className="h-4 w-4" />
-                    Reset
+                      : `Simpan ${quickStats.hadir} Siswa Hadir`}
                   </button>
                 </div>
               </>

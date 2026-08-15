@@ -134,15 +134,3 @@ export function formatTanggalToISO(tanggal: string): string {
   return `${y}-${m.padStart(2, "0")}-${d.padStart(2, "0")}`;
 }
 
-/**
- * Infer expected Gen from SKAGARA class name prefix.
- * e.g. "X AKL 1" -> "10", "XI TKJ 2" -> "11", "XII RPL 1" -> "12"
- */
-export function detectGenFromKelas(kelas: string): string | null {
-  const trimmed = kelas.trim();
-  if (trimmed.startsWith("X ") || trimmed === "X") return "10";
-  if (trimmed.startsWith("XI ") || trimmed === "XI") return "11";
-  if (trimmed.startsWith("XII ") || trimmed === "XII") return "12";
-  return null;
-}
-

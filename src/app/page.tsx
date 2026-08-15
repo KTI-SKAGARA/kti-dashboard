@@ -185,7 +185,7 @@ export default function DashboardPage() {
         tanggalList = Array.from(tanggalSet).sort((a, b) => {
           const [ad, am, ay] = a.split("/").map(Number);
           const [bd, bm, by] = b.split("/").map(Number);
-          if (ay !== by) return by - ay; // newest date first
+          if (ay !== by) return by - ay;
           if (am !== bm) return bm - am;
           return bd - ad;
         });
@@ -1782,7 +1782,7 @@ export default function DashboardPage() {
                     >
                       <span className="text-sm font-display">Gen {g}</span>
                       <span className="text-[10px] text-muted">
-                        {g === "10" ? "Kelas X" : g === "11" ? "Kelas XI" : g === "12" ? "Kelas XII" : `Angkatan ${g}`}
+                        Angkatan {g}
                       </span>
                     </button>
                   ))}
@@ -1860,7 +1860,7 @@ export default function DashboardPage() {
                     >
                       <span className="text-xs font-display">Gen {g}</span>
                       <span className="text-[10px] text-muted">
-                        {g === "10" ? "Kelas X" : g === "11" ? "Kelas XI" : g === "12" ? "Kelas XII" : `Angkatan ${g}`}
+                        Angkatan {g}
                       </span>
                     </button>
                   ))}
@@ -1897,21 +1897,21 @@ export default function DashboardPage() {
                   value={editKelas}
                   onChange={(e) => setEditKelas(e.target.value)}
                 >
-                  <optgroup label="Kelas X (Gen 10)">
+                  <optgroup label="Kelas X (Sepuluh)">
                     {SKAGARA_CLASSES.filter((k) => k.startsWith("X ")).map((k) => (
                       <option key={k} value={k}>
                         {k}
                       </option>
                     ))}
                   </optgroup>
-                  <optgroup label="Kelas XI (Gen 11)">
+                  <optgroup label="Kelas XI (Sebelas)">
                     {SKAGARA_CLASSES.filter((k) => k.startsWith("XI ")).map((k) => (
                       <option key={k} value={k}>
                         {k}
                       </option>
                     ))}
                   </optgroup>
-                  <optgroup label="Kelas XII (Gen 12)">
+                  <optgroup label="Kelas XII (Dua Belas)">
                     {SKAGARA_CLASSES.filter((k) => k.startsWith("XII ")).map((k) => (
                       <option key={k} value={k}>
                         {k}
