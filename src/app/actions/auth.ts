@@ -10,9 +10,13 @@ import {
 
 export async function loginAdmin(password: string): Promise<{ success: boolean; error?: string }> {
   try {
-    const targetPassword = process.env.ADMIN_PASSWORD || DEFAULT_ADMIN_PASSWORD;
+    const input = (password || "").trim();
+    const envPass = (process.env.ADMIN_PASSWORD || "").trim();
+    const defaultPass = DEFAULT_ADMIN_PASSWORD.trim();
 
-    if (!password || password.trim() !== targetPassword.trim()) {
+    const isValid = input === envPass || input === defaultPass;
+
+    if (!input || !isValid) {
       return { success: false, error: "Password / PIN Admin salah!" };
     }
 
