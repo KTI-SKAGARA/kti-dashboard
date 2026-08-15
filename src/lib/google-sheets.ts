@@ -7,7 +7,7 @@ import {
   getGenTabName,
   CONFIG_TAB,
 } from "@/types/attendance";
-import { normalizeName } from "@/lib/utils";
+import { normalizeName, getBulanTahunFromDate } from "@/lib/utils";
 import fs from "fs";
 import path from "path";
 
@@ -420,26 +420,55 @@ export async function deleteRecordsBatch(
 export async function updateRecord(
   gen: Gen,
   recordIndex: number,
-  data: Partial<AttendanceRecord>
+  data: Partial<AttendanceRecord> & { targetGen?: Gen }
 ): Promise<void> {
+  const targetGen = data.targetGen && data.targetGen !== gen ? data.targetGen : null;
+
   if (!isGoogleSheetsConfigured()) {
     const mockList = getMockDataForGen(gen);
     const mockLen = mockList.length;
+    let targetRecord: AttendanceRecord | null = null;
+
     if (recordIndex < mockLen) {
-      const record = mockList[recordIndex];
-      if (data.nama !== undefined) record.nama = data.nama;
-      if (data.kelas !== undefined) record.kelas = data.kelas;
-      if (data.statusAbsen !== undefined) record.statusAbsen = data.statusAbsen;
-      if (data.nominalKas !== undefined) record.nominalKas = data.nominalKas;
-      return;
+      targetRecord = { ...mockList[recordIndex] };
+    } else {
+      const appendedIdx = recordIndex - mockLen;
+      if (mockAppended[gen] && appendedIdx >= 0 && appendedIdx < mockAppended[gen].length) {
+        targetRecord = { ...mockAppended[gen][appendedIdx] };
+      }
     }
-    const appendedIdx = recordIndex - mockLen;
-    if (mockAppended[gen] && appendedIdx >= 0 && appendedIdx < mockAppended[gen].length) {
-      const record = mockAppended[gen][appendedIdx];
-      if (data.nama !== undefined) record.nama = data.nama;
-      if (data.kelas !== undefined) record.kelas = data.kelas;
-      if (data.statusAbsen !== undefined) record.statusAbsen = data.statusAbsen;
-      if (data.nominalKas !== undefined) record.nominalKas = data.nominalKas;
+
+    if (targetRecord) {
+      if (data.nama !== undefined) targetRecord.nama = normalizeName(data.nama);
+      if (data.kelas !== undefined) targetRecord.kelas = data.kelas;
+      if (data.statusAbsen !== undefined) targetRecord.statusAbsen = data.statusAbsen;
+      if (data.nominalKas !== undefined) targetRecord.nominalKas = data.nominalKas;
+      if (data.tanggal !== undefined) {
+        targetRecord.tanggal = data.tanggal;
+        targetRecord.bulanTahun =
+          data.bulanTahun ||
+          (targetRecord.tanggal
+            ? getBulanTahunFromDate(targetRecord.tanggal)
+            : targetRecord.bulanTahun);
+      }
+
+      if (targetGen) {
+        if (!mockAppended[targetGen]) mockAppended[targetGen] = [];
+        mockAppended[targetGen].push(targetRecord);
+        if (recordIndex >= mockLen) {
+          const appendedIdx = recordIndex - mockLen;
+          mockAppended[gen]?.splice(appendedIdx, 1);
+        }
+      } else {
+        if (recordIndex < mockLen) {
+          mockList[recordIndex] = targetRecord;
+        } else {
+          const appendedIdx = recordIndex - mockLen;
+          if (mockAppended[gen] && appendedIdx >= 0 && appendedIdx < mockAppended[gen].length) {
+            mockAppended[gen][appendedIdx] = targetRecord;
+          }
+        }
+      }
     }
     return;
   }
@@ -450,10 +479,122 @@ export async function updateRecord(
 
   if (recordIndex >= 0 && recordIndex < rows.length) {
     const row = rows[recordIndex];
-    if (data.nama !== undefined) row.set("Nama", normalizeName(data.nama));
-    if (data.kelas !== undefined) row.set("Kelas", data.kelas);
-    if (data.statusAbsen !== undefined) row.set("Status_Absen", data.statusAbsen);
-    if (data.nominalKas !== undefined) row.set("Nominal_Kas", String(data.nominalKas));
-    await row.save();
+    const existingTanggal = row.get("Tanggal") ?? "";
+    const existingNama = row.get("Nama") ?? "";
+    const existingKelas = row.get("Kelas") ?? "";
+    const existingStatus = (row.get("Status_Absen") ?? "Hadir") as StatusAbsen;
+    const existingKas = Number(row.get("Nominal_Kas") ?? 0);
+    const existingBulan = row.get("Bulan_Tahun") ?? "";
+
+    const finalTanggal = data.tanggal !== undefined ? data.tanggal : existingTanggal;
+    const finalNama = data.nama !== undefined ? normalizeName(data.nama) : existingNama;
+    const finalKelas = data.kelas !== undefined ? data.kelas : existingKelas;
+    const finalStatus = data.statusAbsen !== undefined ? data.statusAbsen : existingStatus;
+    const finalKas = data.nominalKas !== undefined ? data.nominalKas : existingKas;
+    const finalBulan =
+      data.bulanTahun !== undefined
+        ? data.bulanTahun
+        : data.tanggal
+        ? getBulanTahunFromDate(finalTanggal)
+        : existingBulan;
+
+    if (targetGen) {
+      await ensureGenTab(targetGen);
+      const targetSheet = await getSheet(getGenTabName(targetGen));
+      await targetSheet.addRow({
+        Tanggal: finalTanggal,
+        Nama: finalNama,
+        Kelas: finalKelas,
+        Status_Absen: finalStatus,
+        Nominal_Kas: finalKas,
+        Bulan_Tahun: finalBulan,
+      });
+      await row.delete();
+    } else {
+      if (data.nama !== undefined) row.set("Nama", finalNama);
+      if (data.kelas !== undefined) row.set("Kelas", finalKelas);
+      if (data.statusAbsen !== undefined) row.set("Status_Absen", finalStatus);
+      if (data.nominalKas !== undefined) row.set("Nominal_Kas", String(finalKas));
+      if (data.tanggal !== undefined) {
+        row.set("Tanggal", finalTanggal);
+        row.set("Bulan_Tahun", finalBulan);
+      }
+      await row.save();
+    }
   }
 }
+
+export async function moveRecordsBatch(
+  fromGen: Gen,
+  recordIndexes: number[],
+  targetGen: Gen
+): Promise<void> {
+  if (fromGen === targetGen || recordIndexes.length === 0) return;
+
+  const sorted = [...recordIndexes].sort((a, b) => b - a);
+
+  if (!isGoogleSheetsConfigured()) {
+    const mockList = getMockDataForGen(fromGen);
+    const mockLen = mockList.length;
+    if (!mockAppended[targetGen]) mockAppended[targetGen] = [];
+
+    for (const idx of sorted) {
+      let record: AttendanceRecord | null = null;
+      if (idx < mockLen) {
+        record = { ...mockList[idx] };
+      } else {
+        const appendedIdx = idx - mockLen;
+        if (mockAppended[fromGen] && appendedIdx >= 0 && appendedIdx < mockAppended[fromGen].length) {
+          record = mockAppended[fromGen][appendedIdx];
+          mockAppended[fromGen].splice(appendedIdx, 1);
+        }
+      }
+      if (record) {
+        mockAppended[targetGen].push(record);
+      }
+    }
+    return;
+  }
+
+  const fromSheet = await getSheet(getGenTabName(fromGen));
+  const rows = await fromSheet.getRows();
+
+  await ensureGenTab(targetGen);
+  const targetSheet = await getSheet(getGenTabName(targetGen));
+
+  const recordsToMove: AttendanceRecord[] = [];
+  const rowsToDelete: (typeof rows)[number][] = [];
+
+  for (const idx of sorted) {
+    if (idx >= 0 && idx < rows.length) {
+      const row = rows[idx];
+      recordsToMove.push({
+        tanggal: row.get("Tanggal") ?? "",
+        nama: normalizeName(row.get("Nama") ?? ""),
+        kelas: row.get("Kelas") ?? "",
+        statusAbsen: (row.get("Status_Absen") ?? "Hadir") as StatusAbsen,
+        nominalKas: Number(row.get("Nominal_Kas") ?? 0),
+        bulanTahun: row.get("Bulan_Tahun") ?? "",
+      });
+      rowsToDelete.push(row);
+    }
+  }
+
+  if (recordsToMove.length > 0) {
+    await targetSheet.addRows(
+      recordsToMove.map((r) => ({
+        Tanggal: r.tanggal,
+        Nama: r.nama,
+        Kelas: r.kelas,
+        Status_Absen: r.statusAbsen,
+        Nominal_Kas: r.nominalKas,
+        Bulan_Tahun: r.bulanTahun,
+      }))
+    );
+
+    for (const row of rowsToDelete) {
+      await row.delete();
+    }
+  }
+}
+

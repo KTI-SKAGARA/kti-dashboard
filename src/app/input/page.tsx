@@ -16,7 +16,14 @@ import {
   getFilterOptions,
   getGenList,
 } from "@/app/actions/attendance";
-import { getTodayISO, parseISOTanggal, normalizeName, formatRupiah } from "@/lib/utils";
+import {
+  getTodayISO,
+  parseISOTanggal,
+  normalizeName,
+  formatRupiah,
+  formatTanggalIndo,
+  detectGenFromKelas,
+} from "@/lib/utils";
 import { APP_NAME, SCHOOL_NAME, TOAST_DURATION } from "@/lib/constants";
 import {
   Send,
@@ -27,6 +34,7 @@ import {
   User,
   ListChecks,
   PenLine,
+  AlertTriangle,
 } from "lucide-react";
 import Link from "next/link";
 import Toast from "@/components/Toast";
@@ -68,7 +76,7 @@ export default function InputPage() {
   const [checkedMap, setCheckedMap] = useState<Record<string, boolean>>({});
   const [kasMap, setKasMap] = useState<Record<string, number>>({});
 
-  // Active gens only (for dropdown)
+  // Active gens only (for dropdown & buttons)
   const activeGens = useMemo(
     () => genList.filter((g) => g.status === "aktif").map((g) => g.gen),
     [genList]
@@ -127,6 +135,17 @@ export default function InputPage() {
     if (gen) loadGenData(gen); // eslint-disable-line react-hooks/set-state-in-effect
   }, [gen, loadGenData]);
 
+  // Check if current Gen matches selected Class
+  const detectedGenForClass = useMemo(() => {
+    if (!kelas) return null;
+    return detectGenFromKelas(kelas);
+  }, [kelas]);
+
+  const isGenMismatch = useMemo(() => {
+    if (!detectedGenForClass || !gen) return false;
+    return detectedGenForClass !== gen;
+  }, [detectedGenForClass, gen]);
+
   // Students for selected class (quick mode)
   const studentsForKelas = useMemo(() => {
     if (!kelas) return [];
@@ -173,6 +192,17 @@ export default function InputPage() {
     }
   };
 
+  const handleKelasChange = (newKelas: string) => {
+    setKelas(newKelas);
+    if (errors.kelas) setErrors((prev) => ({ ...prev, kelas: "" }));
+
+    const detected = detectGenFromKelas(newKelas);
+    if (detected && detected !== gen && activeGens.includes(detected)) {
+      // Auto switch or alert
+      setGen(detected);
+    }
+  };
+
   const handleNamaChange = (val: string) => {
     const upperVal = val.toUpperCase();
     setNama(upperVal);
@@ -185,6 +215,10 @@ export default function InputPage() {
     if (matched && matched.kelas) {
       setKelas(matched.kelas);
       if (errors.kelas) setErrors((prev) => ({ ...prev, kelas: "" }));
+      const detected = detectGenFromKelas(matched.kelas);
+      if (detected && detected !== gen && activeGens.includes(detected)) {
+        setGen(detected);
+      }
     }
   };
 
@@ -200,7 +234,12 @@ export default function InputPage() {
     setNama(s.nama);
     setKelas(s.kelas);
     setShowSuggestions(false);
-    setErrors((prev) => ({ ...prev, nama: "", kelas: "" }));
+    if (errors.nama || errors.kelas) setErrors((prev) => ({ ...prev, nama: "", kelas: "" }));
+
+    const detected = detectGenFromKelas(s.kelas);
+    if (detected && detected !== gen && activeGens.includes(detected)) {
+      setGen(detected);
+    }
   };
 
   const validate = (): boolean => {
@@ -399,35 +438,73 @@ export default function InputPage() {
       </div>
 
       {/* Shared: Gen + Kelas + Tanggal */}
-      <div className="card mt-4 p-6 space-y-4 sm:p-8">
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-          <div>
-            <label htmlFor="input-gen" className="label">
-              Gen <span className="text-danger">*</span>
+      <div className="card mt-4 p-6 space-y-5 sm:p-8">
+        {/* Visual Gen Selector */}
+        <div>
+          <div className="flex items-center justify-between">
+            <label className="label !mb-1.5 flex items-center gap-1.5">
+              <span>Target Generasi / Angkatan</span>
+              <span className="text-danger">*</span>
             </label>
-            <select
-              id="input-gen"
-              className={`select ${
-                errors.gen ? "!border-danger focus:!ring-danger/20" : ""
-              }`}
-              value={gen}
-              onChange={(e) => handleGenChange(e.target.value)}
-            >
-              <option value="">-- Pilih Gen --</option>
-              {activeGens.map((g) => (
-                <option key={g} value={g}>
-                  Gen {g}
-                </option>
-              ))}
-            </select>
-            {errors.gen && (
-              <p className="mt-1 flex items-center gap-1 text-xs font-semibold text-danger">
-                <AlertCircle className="h-3 w-3" />
-                {errors.gen}
-              </p>
-            )}
+            <span className="text-[11px] font-semibold text-muted">
+              Pilih Gen sebelum menyimpan
+            </span>
           </div>
 
+          <div className="grid grid-cols-3 gap-2">
+            {activeGens.map((g) => {
+              const isSelected = gen === g;
+              const gradeHint = g === "10" ? "Kelas X" : g === "11" ? "Kelas XI" : g === "12" ? "Kelas XII" : `Angkatan ${g}`;
+              return (
+                <button
+                  key={g}
+                  type="button"
+                  onClick={() => handleGenChange(g)}
+                  className={`flex flex-col items-center justify-center rounded-xl border-2 p-3 transition-all min-h-[56px] text-center ${
+                    isSelected
+                      ? "border-accent bg-accent/10 text-accent font-extrabold hard-shadow-sm ring-2 ring-accent/20"
+                      : "border-border bg-surface-2 text-foreground font-semibold hover:border-border-focus hover:bg-surface"
+                  }`}
+                >
+                  <span className="text-sm font-display uppercase tracking-wide">
+                    Gen {g}
+                  </span>
+                  <span className="text-[10px] font-medium text-muted">
+                    {gradeHint}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+
+          {errors.gen && (
+            <p className="mt-1.5 flex items-center gap-1 text-xs font-semibold text-danger">
+              <AlertCircle className="h-3 w-3" />
+              {errors.gen}
+            </p>
+          )}
+        </div>
+
+        {/* Gen & Class Mismatch Alert */}
+        {isGenMismatch && (
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border-2 border-amber-500/50 bg-amber-500/10 p-3.5 text-xs text-amber-900 dark:text-amber-200">
+            <div className="flex items-center gap-2">
+              <AlertTriangle className="h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" />
+              <span>
+                Kelas <strong>{kelas}</strong> biasanya untuk <strong>Gen {detectedGenForClass}</strong> (saat ini Gen {gen}).
+              </span>
+            </div>
+            <button
+              type="button"
+              onClick={() => handleGenChange(detectedGenForClass!)}
+              className="btn btn-primary min-h-[36px] px-3 py-1.5 text-xs font-bold whitespace-nowrap"
+            >
+              Pindah ke Gen {detectedGenForClass}
+            </button>
+          </div>
+        )}
+
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <div>
             <label htmlFor="input-kelas" className="label">
               Kelas <span className="text-danger">*</span>
@@ -438,17 +515,51 @@ export default function InputPage() {
                 errors.kelas ? "!border-danger focus:!ring-danger/20" : ""
               }`}
               value={kelas}
-              onChange={(e) => {
-                setKelas(e.target.value);
-                if (errors.kelas) setErrors((prev) => ({ ...prev, kelas: "" }));
-              }}
+              onChange={(e) => handleKelasChange(e.target.value)}
             >
               <option value="">-- Pilih Kelas --</option>
-              {availableClasses.map((k) => (
-                <option key={k} value={k}>
-                  {k}
-                </option>
-              ))}
+              <optgroup label="Kelas X (Gen 10)">
+                {availableClasses
+                  .filter((k) => k.startsWith("X "))
+                  .map((k) => (
+                    <option key={k} value={k}>
+                      {k}
+                    </option>
+                  ))}
+              </optgroup>
+              <optgroup label="Kelas XI (Gen 11)">
+                {availableClasses
+                  .filter((k) => k.startsWith("XI "))
+                  .map((k) => (
+                    <option key={k} value={k}>
+                      {k}
+                    </option>
+                  ))}
+              </optgroup>
+              <optgroup label="Kelas XII (Gen 12)">
+                {availableClasses
+                  .filter((k) => k.startsWith("XII "))
+                  .map((k) => (
+                    <option key={k} value={k}>
+                      {k}
+                    </option>
+                  ))}
+              </optgroup>
+              {availableClasses.filter(
+                (k) => !k.startsWith("X ") && !k.startsWith("XI ") && !k.startsWith("XII ")
+              ).length > 0 && (
+                <optgroup label="Kelas Lainnya">
+                  {availableClasses
+                    .filter(
+                      (k) => !k.startsWith("X ") && !k.startsWith("XI ") && !k.startsWith("XII ")
+                    )
+                    .map((k) => (
+                      <option key={k} value={k}>
+                        {k}
+                      </option>
+                    ))}
+                </optgroup>
+              )}
             </select>
             {errors.kelas && (
               <p className="mt-1 flex items-center gap-1 text-xs font-semibold text-danger">
@@ -482,7 +593,7 @@ export default function InputPage() {
                 </label>
                 {existingStudents.length > 0 && (
                   <span className="flex items-center gap-1 text-[10px] font-bold uppercase tracking-widest text-muted">
-                    <User className="h-3 w-3" /> {existingStudents.length} siswa terdaftar
+                    <User className="h-3 w-3" /> {existingStudents.length} siswa terdaftar di Gen {gen}
                   </span>
                 )}
               </div>
@@ -612,6 +723,30 @@ export default function InputPage() {
               </div>
             </div>
 
+            {/* Live Preview Card */}
+            <div className="rounded-xl border-2 border-border bg-surface-2 p-3.5 text-xs">
+              <p className="font-bold uppercase tracking-wider text-muted text-[10px]">
+                Konfirmasi Target Penyimpanan:
+              </p>
+              <div className="mt-1.5 flex flex-wrap items-center gap-2">
+                <span className="badge bg-accent text-white font-extrabold px-2 py-0.5">
+                  GEN {gen || "?"}
+                </span>
+                <span className="badge bg-surface border-2 border-border font-bold text-foreground">
+                  {kelas || "Belum pilih kelas"}
+                </span>
+                <span className="badge bg-surface border-2 border-border font-bold uppercase text-foreground">
+                  {nama || "Belum isi nama"}
+                </span>
+                <span className="text-muted font-medium">
+                  • {formatTanggalIndo(parseISOTanggal(tanggal))}
+                </span>
+                <span className="text-muted font-medium">
+                  • {statusAbsen} ({bayarKas ? formatRupiah(Number(nominalKas) || 0) : "Rp 0"})
+                </span>
+              </div>
+            </div>
+
             <div className="flex items-center gap-3 pt-1">
               <button
                 type="submit"
@@ -659,7 +794,7 @@ export default function InputPage() {
               <div className="rounded-xl border-2 border-dashed border-border bg-surface-2 py-10 text-center">
                 <User className="mx-auto h-8 w-8 text-muted" />
                 <p className="mt-2 text-sm font-semibold text-muted">
-                  Belum ada data siswa di kelas <span className="font-bold text-foreground">{kelas}</span>.
+                  Belum ada data siswa di kelas <span className="font-bold text-foreground">{kelas}</span> (Gen {gen}).
                 </p>
                 <p className="mt-1 text-xs font-medium text-muted">
                   Input manual dulu untuk kelas ini di mode &quot;Input Manual&quot;.
@@ -670,6 +805,9 @@ export default function InputPage() {
                 {/* Summary bar */}
                 <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border-2 border-border bg-surface-2 px-4 py-2.5">
                   <div className="flex flex-wrap items-center gap-3 text-xs font-semibold">
+                    <span className="badge bg-accent text-white font-extrabold px-2 py-0.5">
+                      GEN {gen}
+                    </span>
                     <span className="text-muted">
                       <span className="font-bold text-foreground">{quickStats.totalStudents}</span> siswa
                     </span>
@@ -743,6 +881,27 @@ export default function InputPage() {
                       ))}
                     </tbody>
                   </table>
+                </div>
+
+                {/* Live Target Card */}
+                <div className="rounded-xl border-2 border-border bg-surface-2 p-3.5 text-xs">
+                  <p className="font-bold uppercase tracking-wider text-muted text-[10px]">
+                    Konfirmasi Penyimpanan Mode Cepat:
+                  </p>
+                  <div className="mt-1.5 flex flex-wrap items-center gap-2">
+                    <span className="badge bg-accent text-white font-extrabold px-2 py-0.5">
+                      GEN {gen}
+                    </span>
+                    <span className="badge bg-surface border-2 border-border font-bold text-foreground">
+                      {kelas}
+                    </span>
+                    <span className="text-muted font-medium">
+                      • {formatTanggalIndo(parseISOTanggal(tanggal))}
+                    </span>
+                    <span className="text-muted font-medium">
+                      • {quickStats.hadirCount} siswa hadir (Total Kas {formatRupiah(quickStats.totalKas)})
+                    </span>
+                  </div>
                 </div>
 
                 {errors.quick && (

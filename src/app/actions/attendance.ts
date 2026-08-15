@@ -18,6 +18,7 @@ import {
   deleteRecord,
   deleteRecordsBatch,
   updateRecord,
+  moveRecordsBatch,
   getGenConfig,
   ensureGenTab,
   markGenLulus,
@@ -104,10 +105,12 @@ export async function getFilterOptions(
 
     const kelasSet = new Set<string>();
     const bulanSet = new Set<string>();
+    const tanggalSet = new Set<string>();
 
     for (const r of records) {
       if (r.kelas) kelasSet.add(r.kelas);
       if (r.bulanTahun) bulanSet.add(r.bulanTahun);
+      if (r.tanggal) tanggalSet.add(r.tanggal);
     }
 
     const kelasList = Array.from(kelasSet).sort((a, b) =>
@@ -120,7 +123,15 @@ export async function getFilterOptions(
       return ay !== by ? ay - by : am - bm;
     });
 
-    return { success: true, data: { kelasList, bulanList } };
+    const tanggalList = Array.from(tanggalSet).sort((a, b) => {
+      const [ad, am, ay] = a.split("/").map(Number);
+      const [bd, bm, by] = b.split("/").map(Number);
+      if (ay !== by) return ay - by;
+      if (am !== bm) return am - bm;
+      return ad - bd;
+    });
+
+    return { success: true, data: { kelasList, bulanList, tanggalList } };
   } catch (error) {
     return {
       success: false,
@@ -363,7 +374,7 @@ export async function deleteBatchAttendanceRecords(
 }
 
 // ---------------------------------------------------------------------------
-// Update: update an attendance record by index
+// Update: update an attendance record by index (supports moving Gen & changing date)
 // ---------------------------------------------------------------------------
 
 export async function updateAttendanceRecord(
@@ -374,15 +385,66 @@ export async function updateAttendanceRecord(
     kelas?: string;
     statusAbsen?: StatusAbsen;
     nominalKas?: number;
+    tanggal?: string;
+    targetGen?: Gen;
   }
 ): Promise<ApiResponse> {
   try {
+    if (data.nama !== undefined && !data.nama.trim()) {
+      return { success: false, error: "Nama siswa tidak boleh kosong." };
+    }
+    if (data.kelas !== undefined && !data.kelas.trim()) {
+      return { success: false, error: "Kelas tidak boleh kosong." };
+    }
+    if (data.tanggal !== undefined && !/^\d{2}\/\d{2}\/\d{4}$/.test(data.tanggal)) {
+      return { success: false, error: "Format tanggal tidak valid (DD/MM/YYYY)." };
+    }
+    if (data.statusAbsen !== undefined && !STATUS_ABSEN_OPTIONS.includes(data.statusAbsen)) {
+      return { success: false, error: "Status absen tidak valid." };
+    }
+    if (
+      data.nominalKas !== undefined &&
+      (data.nominalKas < 0 || isNaN(data.nominalKas) || !Number.isFinite(data.nominalKas))
+    ) {
+      return { success: false, error: "Nominal kas harus berupa angka ≥ 0." };
+    }
+
     await updateRecord(gen, recordIndex, data);
     return { success: true };
   } catch (error) {
     return {
       success: false,
       error: error instanceof Error ? error.message : "Gagal mengupdate data.",
+    };
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Move: batch move attendance records to another Gen
+// ---------------------------------------------------------------------------
+
+export async function moveBatchAttendanceRecords(
+  fromGen: Gen,
+  recordIndexes: number[],
+  targetGen: Gen
+): Promise<ApiResponse<{ moved: number }>> {
+  try {
+    if (!targetGen) {
+      return { success: false, error: "Target Gen harus dipilih." };
+    }
+    if (fromGen === targetGen) {
+      return { success: false, error: "Target Gen harus berbeda dari Gen asal." };
+    }
+    if (!recordIndexes || recordIndexes.length === 0) {
+      return { success: false, error: "Tidak ada catatan yang dipilih untuk dipindahkan." };
+    }
+
+    await moveRecordsBatch(fromGen, recordIndexes, targetGen);
+    return { success: true, data: { moved: recordIndexes.length } };
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : "Gagal memindahkan data ke Gen baru.",
     };
   }
 }

@@ -102,3 +102,47 @@ export function formatBulanTahun(bulanTahun: string): string {
   }
   return bulanTahun;
 }
+
+/**
+ * Format DD/MM/YYYY to Indonesian readable date.
+ * e.g. "15/08/2026" -> "15 Agustus 2026"
+ */
+export function formatTanggalIndo(tanggal: string, short = false): string {
+  const parts = tanggal.split("/");
+  if (parts.length !== 3) return tanggal;
+  const [d, m, y] = parts;
+  const monthNames = short
+    ? ["Jan", "Feb", "Mar", "Apr", "Mei", "Jun", "Jul", "Agu", "Sep", "Okt", "Nov", "Des"]
+    : [
+        "Januari", "Februari", "Maret", "April", "Mei", "Juni",
+        "Juli", "Agustus", "September", "Oktober", "November", "Desember",
+      ];
+  const mIdx = parseInt(m, 10) - 1;
+  if (mIdx >= 0 && mIdx < 12) {
+    return `${parseInt(d, 10)} ${monthNames[mIdx]} ${y}`;
+  }
+  return tanggal;
+}
+
+/**
+ * Convert DD/MM/YYYY to ISO date YYYY-MM-DD (for <input type="date">).
+ */
+export function formatTanggalToISO(tanggal: string): string {
+  const parts = tanggal.split("/");
+  if (parts.length !== 3) return "";
+  const [d, m, y] = parts;
+  return `${y}-${m.padStart(2, "0")}-${d.padStart(2, "0")}`;
+}
+
+/**
+ * Infer expected Gen from SKAGARA class name prefix.
+ * e.g. "X AKL 1" -> "10", "XI TKJ 2" -> "11", "XII RPL 1" -> "12"
+ */
+export function detectGenFromKelas(kelas: string): string | null {
+  const trimmed = kelas.trim();
+  if (trimmed.startsWith("X ") || trimmed === "X") return "10";
+  if (trimmed.startsWith("XI ") || trimmed === "XI") return "11";
+  if (trimmed.startsWith("XII ") || trimmed === "XII") return "12";
+  return null;
+}
+
