@@ -17,6 +17,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import Toast from "@/components/Toast";
+import { getGenBadgeColor } from "@/lib/utils";
 
 export default function AdminPage() {
   const [gens, setGens] = useState<GenConfig[]>([]);
@@ -167,7 +168,11 @@ export default function AdminPage() {
               <tbody>
                 {gens.map((g) => (
                   <tr key={g.gen}>
-                    <td className="font-display font-extrabold text-foreground">Gen {g.gen}</td>
+                    <td>
+                      <span className={`badge font-display font-extrabold text-sm ${getGenBadgeColor(g.gen)}`}>
+                        Gen {g.gen}
+                      </span>
+                    </td>
                     <td>
                       {g.status === "aktif" ? (
                         <span className="badge border-emerald-500/40 bg-emerald-500/15 text-emerald-600 dark:text-emerald-300">Aktif</span>

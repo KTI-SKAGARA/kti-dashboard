@@ -22,6 +22,7 @@ import {
   normalizeName,
   formatRupiah,
   formatTanggalIndo,
+  getGenCardSelectedStyle,
 } from "@/lib/utils";
 import { APP_NAME, SCHOOL_NAME, TOAST_DURATION } from "@/lib/constants";
 import {
@@ -436,7 +437,7 @@ export default function InputPage() {
                   onClick={() => handleGenChange(g)}
                   className={`flex flex-col items-center justify-center rounded-xl border-2 p-3 transition-all min-h-[56px] text-center ${
                     isSelected
-                      ? "border-accent bg-accent/10 text-accent font-extrabold hard-shadow-sm ring-2 ring-accent/20"
+                      ? getGenCardSelectedStyle(g)
                       : "border-border bg-surface-2 text-foreground font-semibold hover:border-border-focus hover:bg-surface"
                   }`}
                 >

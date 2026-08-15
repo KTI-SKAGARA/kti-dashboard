@@ -10,6 +10,7 @@ import {
   formatTanggalIndo,
   formatBulanTahun,
   getTodayFormatted,
+  getGenBadgeColor,
 } from "@/lib/utils";
 import {
   ChevronLeft,
@@ -426,7 +427,7 @@ export default function AttendanceCalendar({
                   {selectedSummary.gens.map((g) => (
                     <span
                       key={g}
-                      className="badge bg-accent font-bold text-white px-2 py-0.5"
+                      className={`badge font-bold ${getGenBadgeColor(g)} px-2 py-0.5`}
                     >
                       GEN {g}
                     </span>
@@ -474,7 +475,7 @@ export default function AttendanceCalendar({
                           {r.nominalKas > 0 ? formatRupiah(r.nominalKas) : "—"}
                         </td>
                         <td>
-                          <span className="badge border-border bg-surface-2 text-muted">
+                          <span className={`badge font-bold ${getGenBadgeColor(r._gen)}`}>
                             GEN {r._gen}
                           </span>
                         </td>

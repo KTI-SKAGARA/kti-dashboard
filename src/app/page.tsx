@@ -27,6 +27,8 @@ import {
   getTodayFormatted,
   getTodayISO,
   parseISOTanggal,
+  getGenBadgeColor,
+  getGenCardSelectedStyle,
 } from "@/lib/utils";
 import { APP_NAME, PAGE_SIZE, TOAST_DURATION } from "@/lib/constants";
 import {
@@ -792,12 +794,7 @@ export default function DashboardPage() {
     return `Gen ${g}${gc.status === "lulus" ? " (Lulus)" : ""}`;
   };
 
-  const activeGenBadgeColor = (g: Gen) => {
-    if (g === "10") return "border-blue-500/40 bg-blue-500/15 text-blue-600 dark:text-blue-300";
-    if (g === "11") return "border-purple-500/40 bg-purple-500/15 text-purple-600 dark:text-purple-300";
-    if (g === "12") return "border-pink-500/40 bg-pink-500/15 text-pink-600 dark:text-pink-300";
-    return "border-accent/40 bg-accent/15 text-accent";
-  };
+  const activeGenBadgeColor = (g: Gen) => getGenBadgeColor(g);
 
   return (
     <div className="mx-auto max-w-5xl animate-page">
@@ -1733,7 +1730,7 @@ export default function DashboardPage() {
                       onClick={() => setBulkMoveTargetGen(g)}
                       className={`flex flex-col items-center justify-center rounded-xl border-2 p-2.5 transition-all text-center ${
                         bulkMoveTargetGen === g
-                          ? "border-accent bg-accent/10 text-accent font-extrabold ring-2 ring-accent/20"
+                          ? getGenCardSelectedStyle(g)
                           : "border-border bg-surface-2 text-foreground font-semibold hover:bg-surface"
                       }`}
                     >
@@ -1811,7 +1808,7 @@ export default function DashboardPage() {
                       onClick={() => setEditGen(g)}
                       className={`flex flex-col items-center justify-center rounded-xl border-2 p-2 transition-all text-center ${
                         editGen === g
-                          ? "border-accent bg-accent/10 text-accent font-extrabold ring-2 ring-accent/20"
+                          ? getGenCardSelectedStyle(g)
                           : "border-border bg-surface-2 text-foreground font-semibold hover:bg-surface"
                       }`}
                     >
