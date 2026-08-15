@@ -34,10 +34,9 @@ export default function Navbar() {
     setLoggingOut(true);
     try {
       await logoutAdmin();
-      router.push("/login");
-      router.refresh();
-    } finally {
-      setLoggingOut(false);
+      window.location.href = "/login";
+    } catch {
+      window.location.href = "/login";
     }
   };
 

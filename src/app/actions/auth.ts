@@ -34,9 +34,22 @@ export async function loginAdmin(password: string): Promise<{ success: boolean; 
   }
 }
 
-export async function logoutAdmin(): Promise<void> {
-  const cookieStore = await cookies();
-  cookieStore.delete(COOKIE_NAME);
+export async function logoutAdmin(): Promise<{ success: boolean }> {
+  try {
+    const cookieStore = await cookies();
+    cookieStore.set(COOKIE_NAME, "", {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === "production",
+      sameSite: "lax",
+      maxAge: 0,
+      expires: new Date(0),
+      path: "/",
+    });
+    cookieStore.delete(COOKIE_NAME);
+    return { success: true };
+  } catch {
+    return { success: true };
+  }
 }
 
 export async function checkAuth(): Promise<boolean> {
