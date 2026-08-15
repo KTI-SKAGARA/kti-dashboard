@@ -175,29 +175,33 @@ export async function getGenConfig(): Promise<GenConfig[]> {
     const doc = await getDoc();
     const configSheet = doc.sheetsByTitle[CONFIG_TAB];
 
-    if (!configSheet) {
-      // No CONFIG tab yet — derive from existing GEN tabs
-      const gens: GenConfig[] = [];
-      for (const [title] of Object.entries(doc.sheetsByTitle)) {
-        const match = title.match(/^GEN\s+(\d+)$/i);
-        if (match) {
-          gens.push({ gen: match[1], status: "aktif" });
-        }
+    // Collect all gens from baseline default gens + all sheet tab titles in the spreadsheet
+    const genMap = new Map<Gen, "aktif" | "lulus">();
+    MOCK_GENS.forEach((g) => genMap.set(g, "aktif"));
+
+    for (const title of Object.keys(doc.sheetsByTitle)) {
+      const match = title.match(/^(?:GEN|Kelas)[_\s]+(\d+)$/i);
+      if (match) {
+        genMap.set(match[1], "aktif");
       }
-      return gens.sort((a, b) => Number(a.gen) - Number(b.gen));
     }
 
-    const rows: GoogleSpreadsheetRow[] = await configSheet.getRows();
-    const config: GenConfig[] = rows
-      .map((row: GoogleSpreadsheetRow) => ({
-        gen: (row.get("Gen") ?? "").trim(),
-        status: ((row.get("Status") ?? "aktif").trim().toLowerCase() === "lulus"
-          ? "lulus"
-          : "aktif") as "aktif" | "lulus",
-      }))
-      .filter((c: GenConfig) => c.gen !== "");
+    if (configSheet) {
+      const rows: GoogleSpreadsheetRow[] = await configSheet.getRows();
+      for (const row of rows) {
+        const g = (row.get("Gen") ?? "").trim();
+        const s = (row.get("Status") ?? "aktif").trim().toLowerCase() === "lulus" ? "lulus" : "aktif";
+        if (g) {
+          genMap.set(g, s);
+        }
+      }
+    }
 
-    return config.sort((a, b) => Number(a.gen) - Number(b.gen));
+    const result: GenConfig[] = Array.from(genMap.entries())
+      .map(([gen, status]) => ({ gen, status }))
+      .sort((a, b) => Number(a.gen) - Number(b.gen));
+
+    return result;
   } catch (error) {
     console.error("Error fetching gen config:", error);
     return [...MOCK_GEN_CONFIG];
