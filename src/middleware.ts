@@ -7,14 +7,15 @@ export function middleware(request: NextRequest) {
   const session = request.cookies.get(COOKIE_NAME);
   const isAuthenticated = session?.value === SESSION_SECRET;
 
-  // Allow login page, static files, and _next internal requests
+  // Allow login page, logout endpoint, static files, and _next internal requests
   if (
     pathname.startsWith("/login") ||
+    pathname.startsWith("/api/auth/logout") ||
     pathname.startsWith("/_next") ||
     pathname.startsWith("/favicon.ico")
   ) {
     // If already authenticated and trying to access /login, redirect to dashboard /
-    if (pathname.startsWith("/login") && isAuthenticated) {
+    if (pathname === "/login" && isAuthenticated) {
       return NextResponse.redirect(new URL("/", request.url));
     }
     return NextResponse.next();

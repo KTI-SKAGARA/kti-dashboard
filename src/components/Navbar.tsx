@@ -30,14 +30,9 @@ export default function Navbar() {
     setMounted(true);
   }, []);
 
-  const handleLogout = async () => {
+  const handleLogout = () => {
     setLoggingOut(true);
-    try {
-      await logoutAdmin();
-      window.location.href = "/login";
-    } catch {
-      window.location.href = "/login";
-    }
+    window.location.href = "/api/auth/logout";
   };
 
   const cycleTheme = () => {
