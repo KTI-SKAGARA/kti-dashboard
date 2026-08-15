@@ -40,6 +40,7 @@ import {
   FilterX,
   PieChart as PieChartIcon,
   Table as TableIcon,
+  Calendar as CalendarIcon,
   Download,
   PlusCircle,
   Trash2,
@@ -60,11 +61,12 @@ import Toast from "@/components/Toast";
 import StatCard from "@/components/StatCard";
 import ProgressBarRow from "@/components/ProgressBarRow";
 import AttendanceTrendChart from "@/components/AttendanceTrendChart";
+import AttendanceCalendar from "@/components/AttendanceCalendar";
 
 type TaggedRecord = AttendanceRecord & { _gen: Gen; _rawIdx: number };
 
 export default function DashboardPage() {
-  const [viewMode, setViewMode] = useState<"table" | "stats">("table");
+  const [viewMode, setViewMode] = useState<"table" | "calendar" | "stats">("table");
 
   const [genList, setGenList] = useState<GenConfig[]>([]);
   const [showLulus, setShowLulus] = useState(false);
@@ -861,6 +863,13 @@ export default function DashboardPage() {
               Tabel
             </button>
             <button
+              onClick={() => setViewMode("calendar")}
+              className={`chip min-h-[44px] ${viewMode === "calendar" ? "chip-on" : ""}`}
+            >
+              <CalendarIcon className="h-4 w-4" />
+              Kalender
+            </button>
+            <button
               onClick={() => setViewMode("stats")}
               className={`chip min-h-[44px] ${viewMode === "stats" ? "chip-on" : ""}`}
             >
@@ -1090,7 +1099,7 @@ export default function DashboardPage() {
         )}
       </div>
 
-      {/* VIEW: TABLE */}
+      {/* VIEW 1: TABLE */}
       {viewMode === "table" && (
         <div className="card mt-4 overflow-hidden">
           {loading ? (
@@ -1309,7 +1318,19 @@ export default function DashboardPage() {
         </div>
       )}
 
-      {/* VIEW: STATS */}
+      {/* VIEW 2: CALENDAR */}
+      {viewMode === "calendar" && (
+        <div className="mt-4">
+          <AttendanceCalendar
+            records={allRecords}
+            selectedDate={filters.tanggal}
+            onSelectDate={(tanggal) => setFilters((f) => ({ ...f, tanggal }))}
+            onOpenTableMode={() => setViewMode("table")}
+          />
+        </div>
+      )}
+
+      {/* VIEW 3: STATS */}
       {viewMode === "stats" && (
         <div className="mt-5 space-y-5">
           {/* Header detail if date filtered */}
