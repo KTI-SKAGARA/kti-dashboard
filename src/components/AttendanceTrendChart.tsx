@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, useEffect } from "react";
+import { useMemo, useState } from "react";
 import type { AttendanceRecord } from "@/types/attendance";
 import { formatBulanTahun, formatTanggalIndo, formatRupiah } from "@/lib/utils";
 import { Calendar, TrendingUp, BarChart2 } from "lucide-react";
@@ -44,14 +44,16 @@ export default function AttendanceTrendChart({
     });
   }, [records]);
 
-  // Set default selected month to latest available or initialMonth
-  useEffect(() => {
-    if (initialMonth && availableMonths.includes(initialMonth)) {
-      setSelectedMonth(initialMonth);
-    } else if (availableMonths.length > 0 && (!selectedMonth || !availableMonths.includes(selectedMonth))) {
-      setSelectedMonth(availableMonths[availableMonths.length - 1]);
+  // Derive active month purely without cascading useEffect
+  const activeMonth = useMemo(() => {
+    if (selectedMonth && availableMonths.includes(selectedMonth)) {
+      return selectedMonth;
     }
-  }, [availableMonths, initialMonth, selectedMonth]);
+    if (initialMonth && availableMonths.includes(initialMonth)) {
+      return initialMonth;
+    }
+    return availableMonths[availableMonths.length - 1] || "";
+  }, [selectedMonth, initialMonth, availableMonths]);
 
   // Monthly aggregated data (All time)
   const monthlyData = useMemo<TrendItem[]>(() => {
@@ -99,11 +101,11 @@ export default function AttendanceTrendChart({
       });
   }, [records]);
 
-  // Weekly / Per-Meeting aggregated data for the selected month
+  // Weekly / Per-Meeting aggregated data for the active month
   const weeklyData = useMemo<TrendItem[]>(() => {
-    if (!selectedMonth) return [];
+    if (!activeMonth) return [];
 
-    const monthRecords = records.filter((r) => r.bulanTahun === selectedMonth);
+    const monthRecords = records.filter((r) => r.bulanTahun === activeMonth);
     const map = new Map<
       string,
       { total: number; hadir: number; sakit: number; izin: number; alfa: number; kas: number }
@@ -146,7 +148,7 @@ export default function AttendanceTrendChart({
         if (am !== bm) return am - bm;
         return ad - bd;
       });
-  }, [records, selectedMonth]);
+  }, [records, activeMonth]);
 
   const activeData = chartPeriod === "weekly" ? weeklyData : monthlyData;
 
@@ -214,7 +216,7 @@ export default function AttendanceTrendChart({
             <span className="text-xs font-bold text-muted">Bulan:</span>
             <select
               className="select min-h-[38px] py-1 text-xs font-bold"
-              value={selectedMonth}
+              value={activeMonth}
               onChange={(e) => setSelectedMonth(e.target.value)}
             >
               {availableMonths.map((m) => (
@@ -230,7 +232,7 @@ export default function AttendanceTrendChart({
       {/* Chart SVG */}
       {activeData.length === 0 ? (
         <div className="py-8 text-center text-xs text-muted">
-          Tidak ada data pertemuan untuk bulan {formatBulanTahun(selectedMonth)}.
+          Tidak ada data pertemuan untuk bulan {formatBulanTahun(activeMonth)}.
         </div>
       ) : (
         <div className="relative overflow-x-auto rounded-xl border border-border bg-surface/50 p-2">

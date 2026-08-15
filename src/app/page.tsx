@@ -240,7 +240,7 @@ export default function DashboardPage() {
     }
 
     // Sort: gen asc → kelas (most members first) → nama asc
-    return result.sort((a, b) => {
+    return [...result].sort((a, b) => {
       const genCmp = Number(a._gen) - Number(b._gen);
       if (genCmp !== 0) return genCmp;
 
