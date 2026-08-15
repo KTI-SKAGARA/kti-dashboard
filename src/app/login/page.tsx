@@ -27,8 +27,7 @@ export default function LoginPage() {
     setSubmitting(false);
 
     if (res.success) {
-      router.push("/");
-      router.refresh();
+      window.location.href = "/";
     } else {
       setError(res.error || "Password salah!");
     }
