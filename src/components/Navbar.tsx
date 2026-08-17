@@ -16,6 +16,9 @@ import {
   Monitor,
   Menu,
   X,
+  BarChart3,
+  Users,
+  CalendarDays,
 } from "lucide-react";
 
 export default function Navbar() {
@@ -54,13 +57,17 @@ export default function Navbar() {
   const navLinks = [
     { href: "/", label: "Dashboard", icon: LayoutDashboard },
     { href: "/input", label: "Input Data", icon: PlusCircle },
+    { href: "/kalender", label: "Kalender", icon: CalendarDays },
+    { href: "/stats", label: "Statistik", icon: BarChart3 },
+    { href: "/stats/individual", label: "Rekap Siswa", icon: Users },
     { href: "/admin", label: "Admin", icon: Settings },
   ];
 
-  const isActive = (href: string) => pathname === href;
+  const isActive = (href: string) =>
+    href === "/" ? pathname === "/" : pathname.startsWith(href);
 
   return (
-    <header className="sticky top-0 z-30 border-b-2 border-accent/10 bg-glass-bg backdrop-blur">
+    <header className="sticky top-0 z-30 border-b border-border bg-glass-bg backdrop-blur-md">
       <div className="mx-auto flex h-14 max-w-7xl items-center justify-between px-4 sm:px-6 lg:px-8">
         {/* Brand */}
         <Link
@@ -90,13 +97,10 @@ export default function Navbar() {
                   href={link.href}
                   className={`relative min-h-[44px] rounded-lg px-3 py-2 text-sm font-semibold uppercase tracking-wide transition-colors ${
                     isActive(link.href)
-                      ? "text-accent"
+                      ? "text-accent bg-accent/8"
                       : "text-muted hover:text-foreground"
                   }`}
                 >
-                  {isActive(link.href) && (
-                    <span className="absolute inset-x-1 -bottom-[1px] h-0.5 rounded-full bg-gradient-to-r from-transparent via-accent to-transparent" />
-                  )}
                   <span className="flex items-center gap-1.5">
                     <link.icon className="h-4 w-4" />
                     {link.label}
@@ -161,7 +165,7 @@ export default function Navbar() {
                 onClick={() => setMobileOpen(false)}
                 className={`flex min-h-[48px] items-center gap-2.5 rounded-lg px-4 py-3 text-sm font-semibold uppercase tracking-wide ${
                   isActive(link.href)
-                    ? "bg-accent/15 text-accent"
+                    ? "bg-accent/10 text-accent"
                     : "text-muted hover:text-foreground"
                 }`}
               >

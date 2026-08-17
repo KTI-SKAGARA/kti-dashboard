@@ -97,7 +97,7 @@ export default function AdminPage() {
           <div>
             <p className="text-[10px] font-bold uppercase tracking-widest text-accent">{APP_NAME}</p>
             <h1 className="mt-0.5 font-display text-2xl font-extrabold uppercase tracking-tight text-foreground">
-              Admin <span className="marker">Panel</span>
+              Admin <span className="text-accent">Panel</span>
             </h1>
           </div>
         </div>

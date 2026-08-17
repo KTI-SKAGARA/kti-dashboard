@@ -20,7 +20,7 @@ export default function DeleteConfirmModal({
 }: DeleteConfirmModalProps) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-foreground/50 p-4">
-      <div className="card w-full max-w-sm p-6 hard-shadow">
+      <div className="card w-full max-w-sm p-6 shadow-lg">
         <div className="flex items-start gap-3">
           <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border-2 border-danger/40 bg-danger/15">
             <AlertTriangle className="h-4.5 w-4.5 text-danger" />

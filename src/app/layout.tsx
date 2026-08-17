@@ -16,7 +16,7 @@ export const metadata: Metadata = {
 };
 
 export const viewport: Viewport = {
-  themeColor: "#ff548f",
+  themeColor: "#2563eb",
 };
 
 export default function RootLayout({
@@ -38,11 +38,9 @@ export default function RootLayout({
           rel="stylesheet"
         />
       </head>
-      <body className="noise min-h-screen antialiased">
+      <body className="min-h-screen antialiased">
         <ThemeProvider>
           <SWRegister />
-          <div className="dot-grid pointer-events-none fixed inset-0 -z-10 opacity-40" />
-          <div className="grid-bg pointer-events-none fixed inset-0 -z-10" />
           <Navbar />
           <main className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
             {children}

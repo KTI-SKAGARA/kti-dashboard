@@ -45,7 +45,7 @@ export default function StudentDetailModal({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-foreground/50 p-4">
-      <div className="card flex max-h-[85vh] w-full max-w-lg flex-col p-6 hard-shadow">
+      <div className="card flex max-h-[85vh] w-full max-w-lg flex-col p-6 shadow-lg">
         {/* Header */}
         <div className="flex items-start justify-between gap-3">
           <div className="flex items-start gap-3">

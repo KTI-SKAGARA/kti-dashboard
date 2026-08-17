@@ -50,7 +50,7 @@ export default function LoginPage() {
           </p>
         </div>
 
-        <form onSubmit={handleLogin} className="card p-6 hard-shadow space-y-4">
+        <form onSubmit={handleLogin} className="card p-6 shadow-lg space-y-4">
           <div>
             <label htmlFor="admin-password" className="label">
               Password

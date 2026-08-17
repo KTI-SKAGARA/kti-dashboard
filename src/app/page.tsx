@@ -45,7 +45,6 @@ import {
   PlusCircle,
   Trash2,
   Users,
-  Archive,
   Pencil,
   CheckSquare,
   Square,
@@ -69,7 +68,6 @@ export default function DashboardPage() {
   const [viewMode, setViewMode] = useState<"table" | "calendar" | "stats">("table");
 
   const [genList, setGenList] = useState<GenConfig[]>([]);
-  const [showLulus, setShowLulus] = useState(false);
 
   const [filters, setFilters] = useState<FilterState>({
     gen: "semua",
@@ -123,11 +121,10 @@ export default function DashboardPage() {
     message: string;
   } | null>(null);
 
-  // Gens to iterate based on showLulus toggle
+  // Only active gens
   const iterGens = useMemo(() => {
-    if (showLulus) return genList.map((g) => g.gen);
     return genList.filter((g) => g.status === "aktif").map((g) => g.gen);
-  }, [genList, showLulus]);
+  }, [genList]);
 
   const activeGens = useMemo(
     () => genList.filter((g) => g.status === "aktif").map((g) => g.gen),
@@ -963,7 +960,7 @@ export default function DashboardPage() {
             {APP_NAME} — {filters.gen === "semua" ? "Semua Gen" : genLabel(filters.gen as Gen)}
           </p>
           <h1 className="mt-0.5 font-display text-2xl font-extrabold uppercase tracking-tight text-foreground sm:text-3xl">
-            Rekap <span className="marker">Absensi</span> &amp; Kas
+            Rekap <span className="text-accent">Absensi</span> &amp; Kas
           </h1>
         </div>
         <div className="flex items-center gap-2">
@@ -1067,14 +1064,6 @@ export default function DashboardPage() {
               Gen {g}
             </button>
           ))}
-          <button
-            onClick={() => setShowLulus((v) => !v)}
-            className={`chip min-h-[44px] ${showLulus ? "chip-on" : ""}`}
-            title="Tampilkan gen lulus"
-          >
-            <Archive className="h-4 w-4" />
-            Arsip
-          </button>
         </div>
 
         {/* Secondary filters */}
@@ -1824,7 +1813,7 @@ export default function DashboardPage() {
       {/* Bulk delete modal */}
       {bulkDeleteModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-foreground/50 p-4">
-          <div className="card w-full max-w-sm p-6 hard-shadow">
+           <div className="card w-full max-w-sm p-6 shadow-lg">
             <div className="flex items-start gap-3">
               <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border-2 border-danger/40 bg-danger/15">
                 <Trash2 className="h-4.5 w-4.5 text-danger" />
@@ -1862,7 +1851,7 @@ export default function DashboardPage() {
       {/* Bulk move Gen modal */}
       {bulkMoveModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-foreground/50 p-4">
-          <div className="card w-full max-w-md p-6 hard-shadow">
+          <div className="card w-full max-w-md p-6 shadow-lg">
             <div className="flex items-start gap-3">
               <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border-2 border-accent/40 bg-accent/15">
                 <ArrowRightLeft className="h-4.5 w-4.5 text-accent" />
@@ -1939,7 +1928,7 @@ export default function DashboardPage() {
       {/* Edit modal (Supports changing Gen, Tanggal, Nama, Kelas, Status, Kas) */}
       {editModal.open && editModal.record && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-foreground/50 p-4">
-          <div className="card w-full max-w-md p-6 hard-shadow">
+          <div className="card w-full max-w-md p-6 shadow-lg">
             <h3 className="font-display text-lg font-extrabold uppercase tracking-tight text-foreground">
               Edit Data Absensi
             </h3>

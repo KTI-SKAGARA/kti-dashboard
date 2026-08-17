@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react";
 import type { AttendanceRecord } from "@/types/attendance";
 import { formatBulanTahun, formatTanggalIndo, formatRupiah } from "@/lib/utils";
-import { Calendar, TrendingUp, BarChart2 } from "lucide-react";
+import { BarChart2 } from "lucide-react";
 
 interface AttendanceTrendChartProps {
   records: AttendanceRecord[];
@@ -11,9 +11,9 @@ interface AttendanceTrendChartProps {
 }
 
 interface TrendItem {
-  id: string; // Bulan (MM-YYYY) or Tanggal (DD/MM/YYYY)
-  label: string; // Short label for X axis
-  fullLabel: string; // Full label for tooltip
+  id: string;
+  label: string;
+  fullLabel: string;
   total: number;
   hadir: number;
   sakit: number;
@@ -27,7 +27,6 @@ export default function AttendanceTrendChart({
   records,
   initialMonth,
 }: AttendanceTrendChartProps) {
-  const [chartPeriod, setChartPeriod] = useState<"monthly" | "weekly">("weekly");
   const [selectedMonth, setSelectedMonth] = useState<string>("");
   const [hoveredItem, setHoveredItem] = useState<TrendItem | null>(null);
 
@@ -44,7 +43,6 @@ export default function AttendanceTrendChart({
     });
   }, [records]);
 
-  // Derive active month purely without cascading useEffect
   const activeMonth = useMemo(() => {
     if (selectedMonth && availableMonths.includes(selectedMonth)) {
       return selectedMonth;
@@ -55,54 +53,8 @@ export default function AttendanceTrendChart({
     return availableMonths[availableMonths.length - 1] || "";
   }, [selectedMonth, initialMonth, availableMonths]);
 
-  // Monthly aggregated data (All time)
-  const monthlyData = useMemo<TrendItem[]>(() => {
-    const map = new Map<
-      string,
-      { total: number; hadir: number; sakit: number; izin: number; alfa: number; kas: number }
-    >();
-
-    for (const r of records) {
-      if (!r.bulanTahun) continue;
-      const cur = map.get(r.bulanTahun) || {
-        total: 0,
-        hadir: 0,
-        sakit: 0,
-        izin: 0,
-        alfa: 0,
-        kas: 0,
-      };
-      cur.total += 1;
-      if (r.statusAbsen === "Hadir") cur.hadir += 1;
-      else if (r.statusAbsen === "Sakit") cur.sakit += 1;
-      else if (r.statusAbsen === "Izin") cur.izin += 1;
-      else if (r.statusAbsen === "Alfa") cur.alfa += 1;
-      cur.kas += r.nominalKas;
-      map.set(r.bulanTahun, cur);
-    }
-
-    return Array.from(map.entries())
-      .map(([bulan, s]) => {
-        const [m] = bulan.split("-");
-        const monthNames = ["Jan", "Feb", "Mar", "Apr", "Mei", "Jun", "Jul", "Agu", "Sep", "Okt", "Nov", "Des"];
-        const shortMonth = monthNames[parseInt(m, 10) - 1] || bulan;
-        return {
-          id: bulan,
-          label: shortMonth,
-          fullLabel: formatBulanTahun(bulan),
-          ...s,
-          rate: s.total > 0 ? Math.round((s.hadir / s.total) * 1000) / 10 : 0,
-        };
-      })
-      .sort((a, b) => {
-        const [am, ay] = a.id.split("-").map(Number);
-        const [bm, by] = b.id.split("-").map(Number);
-        return ay !== by ? ay - by : am - bm;
-      });
-  }, [records]);
-
-  // Weekly / Per-Meeting aggregated data for the active month
-  const weeklyData = useMemo<TrendItem[]>(() => {
+  // Per-date aggregated data for the active month
+  const chartData = useMemo<TrendItem[]>(() => {
     if (!activeMonth) return [];
 
     const monthRecords = records.filter((r) => r.bulanTahun === activeMonth);
@@ -114,12 +66,7 @@ export default function AttendanceTrendChart({
     for (const r of monthRecords) {
       if (!r.tanggal) continue;
       const cur = map.get(r.tanggal) || {
-        total: 0,
-        hadir: 0,
-        sakit: 0,
-        izin: 0,
-        alfa: 0,
-        kas: 0,
+        total: 0, hadir: 0, sakit: 0, izin: 0, alfa: 0, kas: 0,
       };
       cur.total += 1;
       if (r.statusAbsen === "Hadir") cur.hadir += 1;
@@ -150,9 +97,7 @@ export default function AttendanceTrendChart({
       });
   }, [records, activeMonth]);
 
-  const activeData = chartPeriod === "weekly" ? weeklyData : monthlyData;
-
-  if (records.length === 0 || (chartPeriod === "weekly" && weeklyData.length === 0 && availableMonths.length === 0)) {
+  if (records.length === 0 || (activeMonth && chartData.length === 0)) {
     return (
       <div className="rounded-xl border-2 border-dashed border-border py-8 text-center">
         <BarChart2 className="mx-auto h-8 w-8 text-muted" />
@@ -161,22 +106,21 @@ export default function AttendanceTrendChart({
     );
   }
 
-  // Chart dimensions & scaling
-  const maxTotal = Math.max(...activeData.map((d) => d.total), 1);
-  const chartW = Math.max(480, activeData.length * 70);
-  const chartH = 200;
-  const padL = 40;
-  const padR = 24;
-  const padT = 24;
+  // Chart dimensions
+  const chartW = Math.max(420, chartData.length * 80);
+  const chartH = 220;
+  const padL = 44;
+  const padR = 20;
+  const padT = 30;
   const padB = 40;
   const innerW = chartW - padL - padR;
   const innerH = chartH - padT - padB;
-  const gap = activeData.length > 0 ? innerW / activeData.length : innerW;
-  const barW = Math.min(32, Math.max(16, gap * 0.45));
+  const gap = chartData.length > 0 ? innerW / chartData.length : innerW;
+  const barW = Math.min(36, Math.max(20, gap * 0.5));
 
-  const barH = (val: number) => (val / maxTotal) * innerH;
+  const barH = (pct: number) => (pct / 100) * innerH;
 
-  const linePoints = activeData
+  const linePoints = chartData
     .map((d, i) => {
       const x = padL + gap * i + gap / 2;
       const y = padT + innerH - (d.rate / 100) * innerH;
@@ -186,60 +130,38 @@ export default function AttendanceTrendChart({
 
   return (
     <div className="space-y-4">
-      {/* Period & Month Controls */}
-      <div className="flex flex-wrap items-center justify-between gap-2.5 border-b border-border pb-3">
-        <div className="inline-flex items-center gap-1 rounded-xl border-2 border-border bg-surface-2 p-1">
-          <button
-            type="button"
-            onClick={() => setChartPeriod("weekly")}
-            className={`chip min-h-[36px] text-xs font-bold ${
-              chartPeriod === "weekly" ? "chip-on" : ""
-            }`}
+      {/* Month selector */}
+      {availableMonths.length > 0 && (
+        <div className="flex items-center gap-2 border-b border-border pb-3">
+          <span className="text-xs font-bold text-muted">Bulan:</span>
+          <select
+            className="select min-h-[38px] py-1 text-xs font-bold"
+            value={activeMonth}
+            onChange={(e) => setSelectedMonth(e.target.value)}
           >
-            <Calendar className="h-3.5 w-3.5" />
-            Mingguan (Per Pertemuan)
-          </button>
-          <button
-            type="button"
-            onClick={() => setChartPeriod("monthly")}
-            className={`chip min-h-[36px] text-xs font-bold ${
-              chartPeriod === "monthly" ? "chip-on" : ""
-            }`}
-          >
-            <TrendingUp className="h-3.5 w-3.5" />
-            Semua Bulan
-          </button>
+            {availableMonths.map((m) => (
+              <option key={m} value={m}>
+                {formatBulanTahun(m)}
+              </option>
+            ))}
+          </select>
+          <span className="ml-auto text-[10px] font-bold text-muted">
+            {chartData.length} Hari Pertemuan
+          </span>
         </div>
+      )}
 
-        {chartPeriod === "weekly" && availableMonths.length > 0 && (
-          <div className="flex items-center gap-2">
-            <span className="text-xs font-bold text-muted">Bulan:</span>
-            <select
-              className="select min-h-[38px] py-1 text-xs font-bold"
-              value={activeMonth}
-              onChange={(e) => setSelectedMonth(e.target.value)}
-            >
-              {availableMonths.map((m) => (
-                <option key={m} value={m}>
-                  {formatBulanTahun(m)}
-                </option>
-              ))}
-            </select>
-          </div>
-        )}
-      </div>
-
-      {/* Chart SVG */}
-      {activeData.length === 0 ? (
+      {/* Chart */}
+      {chartData.length === 0 ? (
         <div className="py-8 text-center text-xs text-muted">
           Tidak ada data pertemuan untuk bulan {formatBulanTahun(activeMonth)}.
         </div>
       ) : (
-        <div className="relative overflow-x-auto rounded-xl border border-border bg-surface/50 p-2">
+        <div className="relative overflow-x-auto rounded-xl border border-border bg-surface/50 p-3">
           <svg
             viewBox={`0 0 ${chartW} ${chartH}`}
             className="w-full"
-            style={{ minWidth: activeData.length > 5 ? 420 : 300 }}
+            style={{ minWidth: chartData.length > 5 ? 420 : 300 }}
           >
             {/* Grid lines & Y-axis labels */}
             {[0, 25, 50, 75, 100].map((pct) => {
@@ -256,11 +178,11 @@ export default function AttendanceTrendChart({
                     strokeDasharray={pct === 0 ? undefined : "3,3"}
                   />
                   <text
-                    x={padL - 6}
-                    y={y + 3}
+                    x={padL - 8}
+                    y={y + 3.5}
                     textAnchor="end"
                     className="fill-muted"
-                    fontSize={9}
+                    fontSize={10}
                     fontWeight={600}
                   >
                     {pct}%
@@ -269,15 +191,21 @@ export default function AttendanceTrendChart({
               );
             })}
 
-            {/* Bars: Total Siswa */}
-            {activeData.map((d, i) => {
+            {/* Bars: % Hadir per pertemuan */}
+            {chartData.map((d, i) => {
               const x = padL + gap * i + gap / 2 - barW / 2;
-              const h = barH(d.total);
+              const h = barH(d.rate);
               const isHovered = hoveredItem?.id === d.id;
+
+              // Color based on rate
+              let barColor = "fill-emerald-500";
+              if (d.rate < 60) barColor = "fill-danger";
+              else if (d.rate < 80) barColor = "fill-amber-400";
+
               return (
                 <g
                   key={d.id}
-                  className="cursor-pointer transition-all"
+                  className="cursor-pointer"
                   onMouseEnter={() => setHoveredItem(d)}
                   onMouseLeave={() => setHoveredItem(null)}
                   onClick={() => setHoveredItem(d)}
@@ -288,62 +216,12 @@ export default function AttendanceTrendChart({
                     width={barW}
                     height={Math.max(h, 4)}
                     rx={4}
-                    className={`transition-colors ${
-                      isHovered
-                        ? "fill-accent opacity-80"
-                        : "fill-accent opacity-25 hover:opacity-50"
-                    }`}
+                    className={`${barColor} transition-opacity ${isHovered ? "opacity-100" : "opacity-60 hover:opacity-80"}`}
                   />
-                  {/* Bar Value (Total Records) */}
+                  {/* Rate label above bar */}
                   <text
                     x={x + barW / 2}
-                    y={padT + innerH - h - 5}
-                    textAnchor="middle"
-                    className="fill-muted text-[9px] font-bold tabular-nums"
-                  >
-                    {d.total}
-                  </text>
-                </g>
-              );
-            })}
-
-            {/* Line: % Kehadiran */}
-            {activeData.length > 1 && (
-              <polyline
-                points={linePoints}
-                fill="none"
-                className="stroke-accent"
-                strokeWidth={3}
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              />
-            )}
-
-            {/* Dots on line */}
-            {activeData.map((d, i) => {
-              const x = padL + gap * i + gap / 2;
-              const y = padT + innerH - (d.rate / 100) * innerH;
-              const isHovered = hoveredItem?.id === d.id;
-              return (
-                <g
-                  key={`dot-${d.id}`}
-                  className="cursor-pointer"
-                  onMouseEnter={() => setHoveredItem(d)}
-                  onMouseLeave={() => setHoveredItem(null)}
-                  onClick={() => setHoveredItem(d)}
-                >
-                  <circle
-                    cx={x}
-                    cy={y}
-                    r={isHovered ? 6 : 4}
-                    className={`stroke-surface transition-all ${
-                      isHovered ? "fill-emerald-400 stroke-2" : "fill-accent stroke-2"
-                    }`}
-                  />
-                  {/* Percentage label above dot */}
-                  <text
-                    x={x}
-                    y={y - 8}
+                    y={padT + innerH - h - 6}
                     textAnchor="middle"
                     className="fill-foreground text-[10px] font-extrabold tabular-nums"
                   >
@@ -353,14 +231,44 @@ export default function AttendanceTrendChart({
               );
             })}
 
+            {/* Trend line */}
+            {chartData.length > 1 && (
+              <polyline
+                points={linePoints}
+                fill="none"
+                className="stroke-accent"
+                strokeWidth={2.5}
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            )}
+
+            {/* Dots on trend line */}
+            {chartData.map((d, i) => {
+              const x = padL + gap * i + gap / 2;
+              const y = padT + innerH - (d.rate / 100) * innerH;
+              const isHovered = hoveredItem?.id === d.id;
+              return (
+                <circle
+                  key={`dot-${d.id}`}
+                  cx={x}
+                  cy={y}
+                  r={isHovered ? 5 : 3.5}
+                  className={`fill-surface stroke-2 transition-all ${
+                    isHovered ? "stroke-accent" : "stroke-accent/60"
+                  }`}
+                />
+              );
+            })}
+
             {/* X-axis labels */}
-            {activeData.map((d, i) => {
+            {chartData.map((d, i) => {
               const x = padL + gap * i + gap / 2;
               return (
                 <text
                   key={`lbl-${d.id}`}
                   x={x}
-                  y={chartH - 12}
+                  y={chartH - 14}
                   textAnchor="middle"
                   className="fill-foreground text-[10px] font-bold"
                 >
@@ -372,12 +280,32 @@ export default function AttendanceTrendChart({
         </div>
       )}
 
-      {/* Selected/Hovered Breakdown Card */}
+      {/* Legend */}
+      <div className="flex items-center justify-center gap-4 text-[10px] font-bold uppercase tracking-wide text-muted">
+        <span className="flex items-center gap-1.5">
+          <span className="inline-block h-2.5 w-4 rounded-sm bg-emerald-500 opacity-60" />
+          Hadir
+        </span>
+        <span className="flex items-center gap-1.5">
+          <span className="inline-block h-2.5 w-4 rounded-sm bg-amber-400 opacity-60" />
+          Kurang (60-79%)
+        </span>
+        <span className="flex items-center gap-1.5">
+          <span className="inline-block h-2.5 w-4 rounded-sm bg-danger opacity-60" />
+          Rendah (&lt;60%)
+        </span>
+        <span className="flex items-center gap-1.5">
+          <span className="inline-block h-0.5 w-4 rounded bg-accent" />
+          Trend
+        </span>
+      </div>
+
+      {/* Tooltip card */}
       {hoveredItem ? (
         <div className="rounded-xl border-2 border-accent/40 bg-accent/5 p-3.5 transition-all">
           <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border pb-2">
             <span className="text-xs font-extrabold uppercase tracking-wide text-foreground">
-              📍 {hoveredItem.fullLabel}
+              {hoveredItem.fullLabel}
             </span>
             <span className="badge bg-emerald-500/15 text-emerald-600 dark:text-emerald-300 font-extrabold text-xs">
               Kehadiran: {hoveredItem.rate}%
@@ -412,7 +340,7 @@ export default function AttendanceTrendChart({
         </div>
       ) : (
         <p className="text-center text-[11px] text-muted">
-          💡 Arahkan kursor atau klik pada bar/titik diagram di atas untuk melihat detail lengkap per pertemuan.
+          Arahkan kursor atau klik pada bar diagram di atas untuk melihat detail per pertemuan.
         </p>
       )}
     </div>

@@ -276,7 +276,7 @@ export default function AttendanceCalendar({
                 onClick={() => onSelectDate(cell.dateKey)}
                 className={`relative flex min-h-[68px] flex-col justify-between rounded-xl border-2 p-1.5 text-left transition-all sm:min-h-[76px] sm:p-2 ${
                   isSelected
-                    ? "border-accent bg-accent/20 hard-shadow-sm ring-2 ring-accent text-foreground font-extrabold"
+                    ? "border-accent bg-accent/20 ring-2 ring-accent text-foreground font-extrabold"
                     : hasMeeting
                     ? "border-accent/40 bg-surface hover:border-accent hover:bg-accent/5"
                     : cell.isCurrentMonth
@@ -341,7 +341,7 @@ export default function AttendanceCalendar({
 
       {/* Selected Date Inspector Card */}
       {selectedDate && (
-        <div className="card p-5 hard-shadow">
+        <div className="card p-5">
           <div className="flex flex-wrap items-center justify-between gap-3 border-b-2 border-border pb-3">
             <div>
               <p className="text-[10px] font-bold uppercase tracking-widest text-accent">

@@ -389,7 +389,7 @@ export default function InputPage() {
               {APP_NAME} — {SCHOOL_NAME}
             </p>
             <h1 className="mt-0.5 font-display text-2xl font-extrabold uppercase tracking-tight text-foreground">
-              Input <span className="marker">Absensi</span> &amp; Kas
+              Input <span className="text-accent">Absensi</span> &amp; Kas
             </h1>
           </div>
         </div>
@@ -628,7 +628,7 @@ export default function InputPage() {
                       onClick={() => handleStatusChange(st)}
                       className={`flex min-h-[44px] items-center justify-center rounded-xl border-2 font-display text-sm font-extrabold uppercase tracking-wide transition-all ${
                         isSelected
-                          ? `${colorMap[st]} hard-shadow-sm`
+                          ? `${colorMap[st]}`
                           : "border-border bg-surface-2 text-muted hover:border-border-focus"
                       }`}
                     >
@@ -780,7 +780,7 @@ export default function InputPage() {
                       onClick={() => toggleStudentCheck(s.nama)}
                       className={`flex cursor-pointer items-center justify-between rounded-xl border-2 p-3 transition-all ${
                         s.checked
-                          ? "border-emerald-500/50 bg-emerald-500/10 text-foreground hard-shadow-sm"
+                          ? "border-emerald-500/50 bg-emerald-500/10 text-foreground"
                           : "border-border bg-surface hover:bg-surface-2 text-muted"
                       }`}
                     >
