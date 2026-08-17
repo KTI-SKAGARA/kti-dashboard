@@ -4,6 +4,7 @@ import {
   type Gen,
   type GenConfig,
   type AttendanceRecord,
+  type TaggedRecord,
   type StatusAbsen,
   type FilterOptions,
   type DashboardStats,
@@ -13,6 +14,7 @@ import {
 } from "@/types/attendance";
 import {
   fetchRecords,
+  queryRecords,
   appendRecord,
   appendRecords,
   deleteRecord,
@@ -66,6 +68,56 @@ export async function getAttendanceRecords(
   try {
     const records = await fetchRecords(gen);
     return { success: true, data: records };
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : "Gagal mengambil data.",
+    };
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Read: query + pagination lintas gen (PRD P2-6)
+// Hanya satu halaman yang dikirim ke client; filter/sort di data layer.
+// ---------------------------------------------------------------------------
+
+export async function getAttendanceRecordsPage(
+  gen: Gen | "semua",
+  page: number,
+  pageSize: number,
+  query?: {
+    kelas?: string;
+    bulan?: string;
+    tanggal?: string;
+    status?: StatusAbsen;
+    search?: string;
+  }
+): Promise<ApiResponse<{ records: TaggedRecord[]; total: number }>> {
+  try {
+    let gens: Gen[];
+    if (gen === "semua") {
+      const config = await getGenConfig();
+      gens = config.filter((g) => g.status === "aktif").map((g) => g.gen);
+    } else {
+      gens = [gen];
+    }
+
+    if (gens.length === 0) {
+      return { success: true, data: { records: [], total: 0 } };
+    }
+
+    const safePage = Math.max(1, Math.floor(page) || 1);
+    const safePageSize = Math.max(1, Math.min(500, Math.floor(pageSize) || 20));
+
+    const { records, total } = await queryRecords(gens, query || {}, safePage, safePageSize);
+
+    const tagged: TaggedRecord[] = records.map((r) => ({
+      ...r,
+      _gen: r._gen,
+      _rowId: r.rowId || `tmp-${r._gen}-${r.tanggal}-${r.nama}`,
+    }));
+
+    return { success: true, data: { records: tagged, total } };
   } catch (error) {
     return {
       success: false,

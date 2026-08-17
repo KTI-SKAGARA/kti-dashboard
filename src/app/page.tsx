@@ -17,12 +17,12 @@ import {
   updateAttendanceRecord,
   moveBatchAttendanceRecords,
   getGenList,
+  getAttendanceRecordsPage,
 } from "@/app/actions/attendance";
 import { useTaggedRecords, useAttendanceData } from "@/hooks/useAttendanceData";
 import {
   formatRupiah,
   formatBulanTahun,
-  formatTanggalIndo,
   formatTanggalToISO,
   getTodayFormatted,
   getTodayISO,
@@ -32,38 +32,25 @@ import {
 } from "@/lib/utils";
 import { APP_NAME, PAGE_SIZE, TOAST_DURATION } from "@/lib/constants";
 import {
-  Search,
-  RefreshCw,
-  ChevronLeft,
-  ChevronRight,
-  Loader2,
-  FilterX,
   PieChart as PieChartIcon,
   Table as TableIcon,
-  Calendar as CalendarIcon,
-  Download,
+  Calendar,
   PlusCircle,
   Trash2,
-  Users,
-  Pencil,
-  CheckSquare,
-  Square,
+  Loader2,
   ArrowRightLeft,
-  Calendar,
-  Eye,
 } from "lucide-react";
 import Link from "next/link";
 import * as XLSX from "xlsx";
 import DeleteConfirmModal from "@/components/DeleteConfirmModal";
 import StudentDetailModal from "@/components/StudentDetailModal";
 import Toast from "@/components/Toast";
-import StatCard from "@/components/StatCard";
-import ProgressBarRow from "@/components/ProgressBarRow";
-import AttendanceTrendChart from "@/components/AttendanceTrendChart";
-import AttendanceCalendar from "@/components/AttendanceCalendar";
+import FilterBar from "@/components/dashboard/FilterBar";
+import AttendanceTable from "@/components/dashboard/AttendanceTable";
+import StatsView from "@/components/dashboard/StatsView";
 
 export default function DashboardPage() {
-  const [viewMode, setViewMode] = useState<"table" | "calendar" | "stats">("table");
+  const [viewMode, setViewMode] = useState<"table" | "stats">("table");
 
   const [genList, setGenList] = useState<GenConfig[]>([]);
 
@@ -77,6 +64,12 @@ export default function DashboardPage() {
   });
 
   const [page, setPage] = useState(1);
+  const [dataVersion, setDataVersion] = useState(0);
+
+  // Tabel: halaman aktif + total dari server (PRD P2-6)
+  const [tableRecords, setTableRecords] = useState<TaggedRecord[]>([]);
+  const [tableTotal, setTableTotal] = useState(0);
+  const [tableLoading, setTableLoading] = useState(true);
 
   // Single Delete modal
   const [deleteModal, setDeleteModal] = useState<{
@@ -154,6 +147,7 @@ export default function DashboardPage() {
   // Setelah operasi tulis: invalidate cache client + refetch paksa (server sudah fresh)
   const reloadAll = useCallback(() => {
     invalidateRecordsCache();
+    setDataVersion((v) => v + 1);
     return loadRecords({ force: true });
   }, [invalidateRecordsCache, loadRecords]);
 
@@ -161,6 +155,53 @@ export default function DashboardPage() {
   useEffect(() => {
     setPage(1);
   }, [filters.gen, filters.kelas, filters.bulan, filters.tanggal, filters.status, filters.search]);
+
+  // Fetch halaman tabel dari server (filter + sort di data layer)
+  useEffect(() => {
+    let cancelled = false;
+    setTableLoading(true);
+    getAttendanceRecordsPage(
+      filters.gen,
+      page,
+      PAGE_SIZE,
+      {
+        kelas: filters.kelas || undefined,
+        bulan: filters.bulan || undefined,
+        tanggal: filters.tanggal || undefined,
+        status: (filters.status || undefined) as StatusAbsen | undefined,
+        search: filters.search || undefined,
+      }
+    )
+      .then((res) => {
+        if (cancelled) return;
+        if (res.success && res.data) {
+          setTableRecords(res.data.records);
+          setTableTotal(res.data.total);
+        } else {
+          setTableRecords([]);
+          setTableTotal(0);
+        }
+        setTableLoading(false);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setTableRecords([]);
+        setTableTotal(0);
+        setTableLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    filters.gen,
+    filters.kelas,
+    filters.bulan,
+    filters.tanggal,
+    filters.status,
+    filters.search,
+    page,
+    dataVersion,
+  ]);
 
   // In-memory Filter Options derived directly from allRecords (Instant 0ms calculation)
   const filterOptions = useMemo<FilterOptions>(() => {
@@ -191,7 +232,7 @@ export default function DashboardPage() {
     return { kelasList, bulanList, tanggalList };
   }, [allRecords]);
 
-  // Client-side filtering + sorting
+  // Client-side filtering (untuk stats, export, dan daftar per tanggal)
   const records = useMemo(() => {
     let result = allRecords;
     if (filters.kelas) result = result.filter((r) => r.kelas === filters.kelas);
@@ -202,24 +243,7 @@ export default function DashboardPage() {
       const q = filters.search.toLowerCase();
       result = result.filter((r) => r.nama.toLowerCase().includes(q));
     }
-
-    // Count members per kelas for sort weight
-    const kelasCount = new Map<string, number>();
-    for (const r of result) {
-      kelasCount.set(r.kelas, (kelasCount.get(r.kelas) || 0) + 1);
-    }
-
-    // Sort: gen asc → kelas (most members first) → nama asc
-    return [...result].sort((a, b) => {
-      const genCmp = Number(a._gen) - Number(b._gen);
-      if (genCmp !== 0) return genCmp;
-
-      const aCount = kelasCount.get(a.kelas) || 0;
-      const bCount = kelasCount.get(b.kelas) || 0;
-      if (aCount !== bCount) return bCount - aCount;
-
-      return a.nama.localeCompare(b.nama, "id");
-    });
+    return result;
   }, [allRecords, filters.kelas, filters.bulan, filters.tanggal, filters.status, filters.search]);
 
   // Dynamic Dashboard Stats calculated from filtered records
@@ -343,11 +367,6 @@ export default function DashboardPage() {
     });
   }, [allRecords, filters.gen, filters.bulan, filters.kelas]);
 
-  // Reset page on filter change
-  useEffect(() => {
-    setPage(1);
-  }, [filters.gen, filters.kelas, filters.bulan, filters.tanggal, filters.status, filters.search]);
-
   // Delete single record handler
   const confirmDeleteRecord = async () => {
     if (!deleteModal.rowId || !deleteModal.record) return;
@@ -410,13 +429,6 @@ export default function DashboardPage() {
       setTimeout(() => setToast(null), TOAST_DURATION);
     }
   };
-
-  // Pagination
-  const totalPages = Math.max(1, Math.ceil(records.length / PAGE_SIZE));
-  const paginatedRecords = records.slice(
-    (page - 1) * PAGE_SIZE,
-    page * PAGE_SIZE
-  );
 
   // Bulk delete handler
   const confirmBulkDelete = async () => {
@@ -519,16 +531,16 @@ export default function DashboardPage() {
   };
 
   const toggleSelectAll = () => {
-    if (selectedKeys.size === paginatedRecords.length) {
+    if (selectedKeys.size === tableRecords.length) {
       setSelectedKeys(new Set());
     } else {
-      const keys = paginatedRecords.map((r) => `${r._gen}|${r._rowId}`);
+      const keys = tableRecords.map((r) => `${r._gen}|${r._rowId}`);
       setSelectedKeys(new Set(keys));
     }
   };
 
   const allSelected =
-    paginatedRecords.length > 0 && selectedKeys.size === paginatedRecords.length;
+    tableRecords.length > 0 && selectedKeys.size === tableRecords.length;
 
   // Export per gen per bulan — Excel format
   const exportToExcel = () => {
@@ -909,12 +921,13 @@ export default function DashboardPage() {
     };
   }, [allRecords]);
 
-  const hasActiveFilter =
+  const hasActiveFilter = Boolean(
     filters.kelas ||
-    filters.bulan ||
-    filters.tanggal ||
-    filters.status ||
-    filters.search;
+      filters.bulan ||
+      filters.tanggal ||
+      filters.status ||
+      filters.search
+  );
 
   const genLabel = (g: Gen) => {
     const gc = genList.find((x) => x.gen === g);
@@ -944,13 +957,6 @@ export default function DashboardPage() {
             >
               <TableIcon className="h-4 w-4" />
               Tabel
-            </button>
-            <button
-              onClick={() => setViewMode("calendar")}
-              className={`chip min-h-[44px] ${viewMode === "calendar" ? "chip-on" : ""}`}
-            >
-              <CalendarIcon className="h-4 w-4" />
-              Kalender
             </button>
             <button
               onClick={() => setViewMode("stats")}
@@ -1019,758 +1025,59 @@ export default function DashboardPage() {
       </div>
 
       {/* Filters Toolbar */}
-      <div className="card mt-5 p-4 sm:p-5">
-        {/* Gen filter */}
-        <div className="flex flex-wrap items-center gap-1.5">
-          <button
-            onClick={() => setFilters((f) => ({ ...f, gen: "semua" }))}
-            className={`chip min-h-[44px] ${filters.gen === "semua" ? "chip-on" : ""}`}
-          >
-            Semua Gen
-          </button>
-          {activeGens.map((g) => (
-            <button
-              key={g}
-              onClick={() => setFilters((f) => ({ ...f, gen: g }))}
-              className={`chip min-h-[44px] ${filters.gen === g ? "chip-on" : ""}`}
-            >
-              Gen {g}
-            </button>
-          ))}
-        </div>
+      <FilterBar
+        filters={filters}
+        onFiltersChange={setFilters}
+        filterOptions={filterOptions}
+        activeGens={activeGens}
+        hasActiveFilter={hasActiveFilter}
+        recordsTotal={records.length}
+        onReload={reloadAll}
+        onExport={exportToExcel}
+      />
 
-        {/* Secondary filters */}
-        <div className="mt-3.5 flex flex-wrap items-center justify-between gap-2 border-t-2 border-border pt-3">
-          <div className="flex flex-wrap items-center gap-1.5">
-            {([
-              { id: "" as const, label: "Semua Status" },
-              { id: "Hadir" as const, label: "Hadir" },
-              { id: "Sakit" as const, label: "Sakit" },
-              { id: "Izin" as const, label: "Izin" },
-              { id: "Alfa" as const, label: "Alfa" },
-            ]).map((st) => (
-              <button
-                key={st.id}
-                onClick={() => setFilters((prev) => ({ ...prev, status: st.id }))}
-                className={`chip min-h-[44px] ${filters.status === st.id ? "chip-on" : ""}`}
-              >
-                {st.label}
-              </button>
-            ))}
-
-            {/* Filter Tanggal Dropdown */}
-            <div className="relative">
-              <select
-                className={`select min-h-[44px] w-auto py-2 text-sm font-medium ${
-                  filters.tanggal ? "!border-accent !bg-accent/10 !text-accent font-bold" : ""
-                }`}
-                value={filters.tanggal}
-                onChange={(e) => setFilters((f) => ({ ...f, tanggal: e.target.value }))}
-              >
-                <option value="">📅 Semua Tanggal</option>
-                {filterOptions.tanggalList.map((t) => (
-                  <option key={t} value={t}>
-                    {formatTanggalIndo(t, true)} ({t})
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            {/* Filter Bulan Dropdown */}
-            <select
-              className="select min-h-[44px] w-auto py-2 text-sm"
-              value={filters.bulan}
-              onChange={(e) => setFilters((f) => ({ ...f, bulan: e.target.value }))}
-            >
-              <option value="">Semua Bulan</option>
-              {filterOptions.bulanList.map((b) => (
-                <option key={b} value={b}>
-                  {formatBulanTahun(b)}
-                </option>
-              ))}
-            </select>
-
-            {/* Filter Kelas Dropdown */}
-            <select
-              className="select min-h-[44px] w-auto py-2 text-sm"
-              value={filters.kelas}
-              onChange={(e) => setFilters((f) => ({ ...f, kelas: e.target.value }))}
-            >
-              <option value="">Semua Kelas</option>
-              {Array.from(new Set([...SKAGARA_CLASSES, ...filterOptions.kelasList]))
-                .sort((a, b) => a.localeCompare(b, "id"))
-                .map((k) => (
-                  <option key={k} value={k}>
-                    {k}
-                  </option>
-                ))}
-            </select>
-          </div>
-
-          <div className="flex items-center gap-2">
-            <div className="relative">
-              <Search className="absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted" />
-              <input
-                type="text"
-                placeholder="Cari nama..."
-                className="input min-h-[44px] w-44 pl-9 pr-3 text-sm sm:w-auto"
-                value={filters.search}
-                onChange={(e) => setFilters((f) => ({ ...f, search: e.target.value }))}
-              />
-            </div>
-            {hasActiveFilter && (
-              <button
-                onClick={() =>
-                  setFilters({
-                    gen: filters.gen,
-                    kelas: "",
-                    bulan: "",
-                    tanggal: "",
-                    status: "",
-                    search: "",
-                  })
-                }
-                className="btn btn-ghost min-h-[44px] min-w-[44px] px-2 py-2"
-                title="Hapus semua filter"
-              >
-                <FilterX className="h-4 w-4" />
-              </button>
-            )}
-            <button
-              onClick={() => {
-                reloadAll();
-              }}
-              className="btn btn-ghost min-h-[44px] min-w-[44px] px-2 py-2"
-              title="Muat ulang data"
-            >
-              <RefreshCw className="h-4 w-4" />
-            </button>
-            <button
-              onClick={exportToExcel}
-              disabled={records.length === 0}
-              className="btn btn-primary min-h-[44px] px-3 py-2 text-sm"
-            >
-              <Download className="h-4 w-4" />
-              Export
-            </button>
-          </div>
-        </div>
-
-        {/* Active Filter Badges */}
-        {filters.tanggal && (
-          <div className="mt-3 flex items-center gap-2 rounded-lg border border-accent/30 bg-accent/5 px-3 py-2 text-xs">
-            <Calendar className="h-4 w-4 text-accent" />
-            <span className="font-semibold text-foreground">
-              Menampilkan data tanggal: <strong>{formatTanggalIndo(filters.tanggal)}</strong> ({filters.tanggal})
-            </span>
-            <button
-              onClick={() => setFilters((f) => ({ ...f, tanggal: "" }))}
-              className="ml-auto text-xs font-bold text-accent hover:underline"
-            >
-              Reset Tanggal
-            </button>
-          </div>
-        )}
-      </div>
-
-      {/* VIEW 1: TABLE */}
+      {/* VIEW 1: TABLE (pagination + filter di server, PRD P2-6) */}
       {viewMode === "table" && (
-        <div className="card mt-4 overflow-hidden">
-          {loading ? (
-            <div className="flex items-center justify-center py-16">
-              <Loader2 className="h-5 w-5 animate-spin text-accent" />
-              <span className="ml-2 text-sm font-medium text-muted">Memuat data...</span>
-            </div>
-          ) : records.length === 0 ? (
-            <div className="py-16 text-center">
-              <Users className="mx-auto h-8 w-8 text-muted" />
-              <p className="mt-2 text-sm font-medium text-muted">
-                {hasActiveFilter
-                  ? "Tidak ada data yang cocok dengan filter yang dipilih."
-                  : "Belum ada data."}
-              </p>
-            </div>
-          ) : (
-            <>
-              <div className="overflow-x-auto">
-                <table className="data-table">
-                  <thead>
-                    <tr>
-                      <th className="w-10">
-                        <button
-                          onClick={toggleSelectAll}
-                          className="btn btn-ghost min-h-[44px] min-w-[44px] p-2"
-                          title={allSelected ? "Batalkan semua" : "Pilih semua"}
-                        >
-                          {allSelected ? (
-                            <CheckSquare className="h-4 w-4 text-accent" />
-                          ) : (
-                            <Square className="h-4 w-4" />
-                          )}
-                        </button>
-                      </th>
-                      <th className="w-10">No</th>
-                      <th>Tanggal</th>
-                      <th>Nama</th>
-                      <th>Kelas</th>
-                      <th>Status</th>
-                      <th className="text-right">Kas</th>
-                      <th>Gen</th>
-                      <th className="w-24"></th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {paginatedRecords.map((r, i) => {
-                      return (
-                        <tr key={`${r._gen}-${r.tanggal}-${r.nama}-${r._rowId}`}>
-                          <td>
-                            <button
-                              onClick={() => toggleSelectRecord(`${r._gen}|${r._rowId}`)}
-                              className="btn btn-ghost min-h-[44px] min-w-[44px] p-2"
-                              title="Pilih"
-                            >
-                              {selectedKeys.has(`${r._gen}|${r._rowId}`) ? (
-                                <CheckSquare className="h-4 w-4 text-accent" />
-                              ) : (
-                                <Square className="h-4 w-4" />
-                              )}
-                            </button>
-                          </td>
-                          <td className="text-muted tabular-nums">
-                            {(page - 1) * PAGE_SIZE + i + 1}
-                          </td>
-                          <td className="whitespace-nowrap font-medium text-foreground">
-                            <button
-                              onClick={() => setFilters((f) => ({ ...f, tanggal: r.tanggal }))}
-                              className="hover:text-accent hover:underline"
-                              title={`Filter hanya tanggal ${r.tanggal}`}
-                            >
-                              {r.tanggal}
-                            </button>
-                          </td>
-                          <td>
-                            <button
-                              onClick={() => setStudentDetail(r.nama)}
-                              className="font-medium uppercase text-foreground underline decoration-accent/40 decoration-dashed underline-offset-2 hover:text-accent hover:decoration-accent"
-                            >
-                              {r.nama}
-                            </button>
-                          </td>
-                          <td className="text-muted">{r.kelas}</td>
-                          <td>
-                            <span
-                              className={`badge ${
-                                r.statusAbsen === "Hadir"
-                                  ? "bg-emerald-500/15 text-emerald-600 dark:text-emerald-300"
-                                  : r.statusAbsen === "Sakit"
-                                  ? "bg-amber-500/15 text-amber-600 dark:text-amber-300"
-                                  : r.statusAbsen === "Izin"
-                                  ? "bg-accent/15 text-accent dark:text-accent"
-                                  : "bg-danger/15 text-danger"
-                              }`}
-                            >
-                              {r.statusAbsen}
-                            </span>
-                          </td>
-                          <td className="text-right tabular-nums">
-                            {r.nominalKas > 0 ? formatRupiah(r.nominalKas) : "—"}
-                          </td>
-                          <td>
-                            <span
-                              className={`badge font-bold ${activeGenBadgeColor(
-                                r._gen
-                              )}`}
-                            >
-                              GEN {r._gen}
-                            </span>
-                          </td>
-                          <td className="whitespace-nowrap text-right">
-                            <div className="inline-flex items-center gap-0.5">
-                              <button
-                                onClick={() => openEditModal(r)}
-                                className="btn btn-ghost min-h-[44px] min-w-[44px] p-2 text-muted hover:!text-accent"
-                                title="Edit data & ubah Gen"
-                              >
-                                <Pencil className="h-4 w-4" />
-                              </button>
-                              <button
-                                onClick={() =>
-                                  setDeleteModal({
-                                    open: true,
-                                    rowId: r._rowId,
-                                    record: r,
-                                  })
-                                }
-                                className="btn btn-ghost min-h-[44px] min-w-[44px] p-2 text-muted hover:!text-danger"
-                                title="Hapus"
-                              >
-                                <Trash2 className="h-4 w-4" />
-                              </button>
-                            </div>
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-
-              {/* Bulk action bar */}
-              {selectedKeys.size > 0 && (
-                <div className="flex flex-wrap items-center justify-between gap-3 border-t-2 border-border bg-accent/5 px-4 py-3">
-                  <p className="text-xs font-bold uppercase tracking-wide text-foreground">
-                    {selectedKeys.size} catatan dipilih
-                  </p>
-                  <div className="flex items-center gap-2">
-                    <button
-                      onClick={() => setSelectedKeys(new Set())}
-                      className="btn btn-ghost min-h-[44px] px-3 py-2 text-sm"
-                    >
-                      Batal
-                    </button>
-                    <button
-                      onClick={() => {
-                        setBulkMoveTargetGen(activeGens[0] || "12");
-                        setBulkMoveModal(true);
-                      }}
-                      className="btn btn-secondary min-h-[44px] px-3 py-2 text-sm font-bold"
-                      title="Pindahkan semua catatan yang dipilih ke Gen lain"
-                    >
-                      <ArrowRightLeft className="h-4 w-4 text-accent" />
-                      Pindah Gen ({selectedKeys.size})
-                    </button>
-                    <button
-                      onClick={() => setBulkDeleteModal(true)}
-                      className="btn btn-danger min-h-[44px] px-3 py-2 text-sm"
-                    >
-                      <Trash2 className="h-4 w-4" />
-                      Hapus Terpilih
-                    </button>
-                  </div>
-                </div>
-              )}
-
-              {/* Pagination */}
-              {totalPages > 1 && (
-                <>
-                  <div className="flex items-center justify-between gap-2 border-t-2 border-border px-4 py-3">
-                    <p className="text-xs font-medium text-muted">
-                      Menampilkan{" "}
-                      <span className="font-bold text-foreground tabular-nums">
-                        {(page - 1) * PAGE_SIZE + 1}–{Math.min(page * PAGE_SIZE, records.length)}
-                      </span>{" "}
-                      dari{" "}
-                      <span className="font-bold text-foreground tabular-nums">{records.length}</span>{" "}
-                      data
-                    </p>
-                    <div className="flex items-center gap-1">
-                      <button
-                        onClick={() => setPage((p) => Math.max(1, p - 1))}
-                        disabled={page <= 1}
-                        className="btn btn-ghost min-h-[44px] min-w-[44px] p-2"
-                        aria-label="Halaman sebelumnya"
-                      >
-                        <ChevronLeft className="h-5 w-5" />
-                      </button>
-                      <span className="px-2 text-sm font-bold text-foreground tabular-nums">
-                        {page} / {totalPages}
-                      </span>
-                      <button
-                        onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-                        disabled={page >= totalPages}
-                        className="btn btn-ghost min-h-[44px] min-w-[44px] p-2"
-                        aria-label="Halaman berikutnya"
-                      >
-                        <ChevronRight className="h-5 w-5" />
-                      </button>
-                    </div>
-                  </div>
-                </>
-              )}
-            </>
-          )}
-        </div>
+        <AttendanceTable
+          records={tableRecords}
+          total={tableTotal}
+          loading={tableLoading || loading}
+          page={page}
+          onPageChange={setPage}
+          hasActiveFilter={hasActiveFilter}
+          selectedKeys={selectedKeys}
+          allSelected={allSelected}
+          onToggleSelectAll={toggleSelectAll}
+          onToggleSelect={toggleSelectRecord}
+          onClearSelection={() => setSelectedKeys(new Set())}
+          onBulkDelete={() => setBulkDeleteModal(true)}
+          onBulkMove={() => {
+            setBulkMoveTargetGen(activeGens[0] || "12");
+            setBulkMoveModal(true);
+          }}
+          onEdit={openEditModal}
+          onDelete={(r) =>
+            setDeleteModal({ open: true, rowId: r._rowId, record: r })
+          }
+          onStudentDetail={setStudentDetail}
+          onFilterTanggal={(tanggal) => setFilters((f) => ({ ...f, tanggal }))}
+          getGenBadgeColor={activeGenBadgeColor}
+        />
       )}
 
-      {/* VIEW 2: CALENDAR */}
-      {viewMode === "calendar" && (
-        <div className="mt-4">
-          <AttendanceCalendar
-            records={allRecords}
-            selectedDate={filters.tanggal}
-            onSelectDate={(tanggal) => setFilters((f) => ({ ...f, tanggal }))}
-            onOpenTableMode={() => setViewMode("table")}
-          />
-        </div>
-      )}
-
-      {/* VIEW 3: STATS */}
+      {/* VIEW 2: STATS */}
       {viewMode === "stats" && (
-        <div className="mt-5 space-y-5">
-          {/* Header detail if date filtered */}
-          {filters.tanggal && (
-            <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border-2 border-accent bg-accent/10 p-4">
-              <div>
-                <p className="text-[10px] font-bold uppercase tracking-wider text-accent">
-                  Statistik Presensi Harian
-                </p>
-                <h2 className="text-base font-extrabold text-foreground">
-                  Tanggal: {formatTanggalIndo(filters.tanggal)} ({filters.tanggal})
-                </h2>
-              </div>
-              <button
-                onClick={() => setFilters((f) => ({ ...f, tanggal: "" }))}
-                className="btn btn-secondary min-h-[40px] px-3 py-1.5 text-xs font-bold"
-              >
-                Lihat Semua Tanggal
-              </button>
-            </div>
-          )}
-
-          {/* Quick Summary Cards */}
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-            <StatCard label="Total Siswa" value={stats.totalRecords} />
-            <StatCard label="Siswa Hadir" value={stats.hadirCount} />
-            <StatCard label="Tingkat Hadir" value={`${stats.attendanceRate}%`} />
-            <StatCard label="Total Kas" value={formatRupiah(stats.totalKas)} />
-          </div>
-
-          <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-            <div className="card p-5">
-              <h2 className="font-display text-sm font-bold uppercase tracking-wide text-foreground">
-                Distribusi Kehadiran {filters.tanggal ? `(${filters.tanggal})` : ""}
-              </h2>
-              {stats.totalRecords === 0 ? (
-                <p className="py-6 text-center text-xs text-muted">Belum ada data.</p>
-              ) : (
-                <div className="mt-4 space-y-3">
-                  <ProgressBarRow
-                    label="Hadir"
-                    count={stats.hadirCount}
-                    total={stats.totalRecords}
-                    fillClass="bg-emerald-500"
-                  />
-                  <ProgressBarRow
-                    label="Sakit"
-                    count={stats.sakitCount}
-                    total={stats.totalRecords}
-                    fillClass="bg-amber-400"
-                  />
-                  <ProgressBarRow
-                    label="Izin"
-                    count={stats.izinCount}
-                    total={stats.totalRecords}
-                    fillClass="bg-accent"
-                  />
-                  <ProgressBarRow
-                    label="Alfa"
-                    count={stats.alfaCount}
-                    total={stats.totalRecords}
-                    fillClass="bg-danger"
-                  />
-                </div>
-              )}
-            </div>
-
-            <div className="card p-5">
-              <h2 className="font-display text-sm font-bold uppercase tracking-wide text-foreground">
-                Ringkasan Kas {filters.tanggal ? `(${filters.tanggal})` : ""}
-              </h2>
-              <div className="mt-4 grid grid-cols-2 gap-3">
-                <StatCard label="Total Kas" value={formatRupiah(stats.totalKas)} />
-                <StatCard
-                  label="Rata-rata / Siswa"
-                  value={formatRupiah(stats.avgKasPerStudent)}
-                />
-              </div>
-              <div className="mt-3 rounded-lg border-2 border-border bg-surface-2 p-3.5">
-                <div className="flex items-center justify-between">
-                  <p className="text-xs font-bold uppercase tracking-wide text-foreground">
-                    Persentase Kehadiran
-                  </p>
-                  <span className="text-base font-extrabold text-foreground tabular-nums">
-                    <span>{stats.attendanceRate}%</span>
-                  </span>
-                </div>
-                <div className="mt-2 h-2.5 w-full rounded-full bg-border">
-                  <div
-                    className="h-full rounded-full bg-gradient-to-r from-accent to-accent-2"
-                    style={{ width: `${stats.attendanceRate}%` }}
-                  />
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* If date is filtered, show direct list of students on that date */}
-          {filters.tanggal ? (
-            <div className="card p-5">
-              <div className="flex flex-wrap items-center justify-between gap-2 border-b-2 border-border pb-3">
-                <div>
-                  <h2 className="font-display text-sm font-bold uppercase tracking-wide text-foreground">
-                    Daftar Siswa pada {formatTanggalIndo(filters.tanggal)}
-                  </h2>
-                  <p className="text-xs text-muted">
-                    Total {records.length} siswa tercatat pada tanggal ini
-                  </p>
-                </div>
-                <button
-                  onClick={() => setViewMode("table")}
-                  className="btn btn-secondary min-h-[36px] px-3 py-1.5 text-xs font-bold"
-                >
-                  <TableIcon className="h-3.5 w-3.5" />
-                  Buka di Mode Tabel
-                </button>
-              </div>
-
-              <div className="mt-3 overflow-x-auto">
-                <table className="data-table">
-                  <thead>
-                    <tr>
-                      <th className="w-10">No</th>
-                      <th>Nama Siswa</th>
-                      <th>Kelas</th>
-                      <th>Status Absen</th>
-                      <th className="text-right">Nominal Kas</th>
-                      <th>Gen</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {records.map((r, i) => (
-                      <tr key={`${r._gen}-${r.nama}-${r._rowId}`}>
-                        <td className="text-muted tabular-nums">{i + 1}</td>
-                        <td className="font-medium uppercase text-foreground">
-                          <button
-                            onClick={() => setStudentDetail(r.nama)}
-                            className="hover:text-accent hover:underline"
-                          >
-                            {r.nama}
-                          </button>
-                        </td>
-                        <td className="text-muted">{r.kelas}</td>
-                        <td>
-                          <span
-                            className={`badge ${
-                              r.statusAbsen === "Hadir"
-                                ? "bg-emerald-500/15 text-emerald-600 dark:text-emerald-300"
-                                : r.statusAbsen === "Sakit"
-                                ? "bg-amber-500/15 text-amber-600 dark:text-amber-300"
-                                : r.statusAbsen === "Izin"
-                                ? "bg-accent/15 text-accent"
-                                : "bg-danger/15 text-danger"
-                            }`}
-                          >
-                            {r.statusAbsen}
-                          </span>
-                        </td>
-                        <td className="text-right font-medium text-foreground tabular-nums">
-                          {r.nominalKas > 0 ? formatRupiah(r.nominalKas) : "—"}
-                        </td>
-                        <td>
-                          <span
-                            className={`badge font-bold ${activeGenBadgeColor(
-                              r._gen
-                            )}`}
-                          >
-                            GEN {r._gen}
-                          </span>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          ) : (
-            /* Daily meeting dates breakdown table */
-            <div className="card p-5">
-              <div className="flex items-center justify-between border-b-2 border-border pb-3">
-                <div>
-                  <h2 className="font-display text-sm font-bold uppercase tracking-wide text-foreground">
-                    Rekap Presensi Harian (Riwayat Pertemuan)
-                  </h2>
-                  <p className="text-xs text-muted">
-                    Klik tombol &quot;Lihat Data&quot; untuk memfilter data siswa pada tanggal tertentu
-                  </p>
-                </div>
-              </div>
-
-              {dailySummaries.length === 0 ? (
-                <p className="py-6 text-center text-xs text-muted">
-                  Belum ada riwayat pertemuan.
-                </p>
-              ) : (
-                <div className="mt-3 overflow-x-auto">
-                  <table className="data-table">
-                    <thead>
-                      <tr>
-                        <th>Tanggal Pertemuan</th>
-                        <th>Gen</th>
-                        <th>Total Siswa</th>
-                        <th>Hadir</th>
-                        <th>Sakit</th>
-                        <th>Izin</th>
-                        <th>Alfa</th>
-                        <th className="text-right">Total Kas</th>
-                        <th className="w-24 text-center">Aksi</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {dailySummaries.map((ds) => (
-                        <tr key={ds.tanggal}>
-                          <td className="font-bold text-foreground">
-                            {formatTanggalIndo(ds.tanggal)} ({ds.tanggal})
-                          </td>
-                          <td>
-                            <div className="flex flex-wrap gap-1">
-                              {Array.from(ds.gens).map((g) => (
-                                <span
-                                  key={g}
-                                  className={`badge font-bold ${activeGenBadgeColor(
-                                    g
-                                  )}`}
-                                >
-                                  GEN {g}
-                                </span>
-                              ))}
-                            </div>
-                          </td>
-                          <td className="text-foreground font-semibold tabular-nums">
-                            {ds.total}
-                          </td>
-                          <td className="text-emerald-600 dark:text-emerald-300 font-semibold tabular-nums">
-                            {ds.hadir}
-                          </td>
-                          <td className="text-amber-600 dark:text-amber-300 tabular-nums">
-                            {ds.sakit}
-                          </td>
-                          <td className="text-accent tabular-nums">{ds.izin}</td>
-                          <td className="text-danger tabular-nums">{ds.alfa}</td>
-                          <td className="text-right font-medium text-foreground tabular-nums">
-                            {formatRupiah(ds.kas)}
-                          </td>
-                          <td className="text-center">
-                            <button
-                              onClick={() => {
-                                setFilters((f) => ({ ...f, tanggal: ds.tanggal }));
-                              }}
-                              className="btn btn-secondary min-h-[36px] px-2.5 py-1 text-xs font-bold"
-                              title={`Filter data presensi tanggal ${ds.tanggal}`}
-                            >
-                              <Eye className="h-3.5 w-3.5" />
-                              Lihat Data
-                            </button>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* Class summaries */}
-          <div className="card p-5">
-            <h2 className="font-display text-sm font-bold uppercase tracking-wide text-foreground">
-              Rekap Kas per Kelas
-            </h2>
-            {stats.classSummaries.length === 0 ? (
-              <p className="py-6 text-center text-xs text-muted">Belum ada rekap per kelas.</p>
-            ) : (
-              <div className="mt-3 overflow-x-auto">
-                <table className="data-table">
-                  <thead>
-                    <tr>
-                      <th>Nama Kelas</th>
-                      <th>Jumlah Catatan</th>
-                      <th>Jumlah Hadir</th>
-                      <th>Total Kas Terkumpul</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {stats.classSummaries.map((cs) => (
-                      <tr key={cs.kelas}>
-                        <td className="font-medium text-foreground">{cs.kelas}</td>
-                        <td className="text-muted tabular-nums">{cs.totalRecords}</td>
-                        <td className="text-muted tabular-nums">{cs.hadirCount}</td>
-                        <td className="font-medium text-foreground tabular-nums">
-                          {formatRupiah(cs.totalKas)}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </div>
-
-          {filters.gen === "semua" && genSummaries.length > 0 && (
-            <div className="card p-5">
-              <h2 className="font-display text-sm font-bold uppercase tracking-wide text-foreground">
-                Rekap per Gen
-              </h2>
-              <div className="mt-3 overflow-x-auto">
-                <table className="data-table">
-                  <thead>
-                    <tr>
-                      <th>Gen</th>
-                      <th>Status</th>
-                      <th>Total Catatan</th>
-                      <th>Jumlah Hadir</th>
-                      <th>Total Kas Terkumpul</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {genSummaries.map((gs) => (
-                      <tr key={gs.gen} className={gs.isLulus ? "opacity-60" : ""}>
-                        <td className="font-medium text-foreground">
-                          <span className="font-display font-extrabold">Gen {gs.gen}</span>
-                        </td>
-                        <td>
-                          {gs.isLulus ? (
-                            <span className="badge border-amber-400/40 bg-amber-400/15 text-amber-600 dark:text-amber-300">
-                              Lulus
-                            </span>
-                          ) : (
-                            <span className="badge border-emerald-500/40 bg-emerald-500/15 text-emerald-600 dark:text-emerald-300">
-                              Aktif
-                            </span>
-                          )}
-                        </td>
-                        <td className="text-muted tabular-nums">{gs.total}</td>
-                        <td className="text-muted tabular-nums">{gs.hadir}</td>
-                        <td className="font-medium text-foreground tabular-nums">
-                          {formatRupiah(gs.kas)}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          )}
-
-          {/* Trend Chart */}
-          <div className="card p-5">
-            <h2 className="font-display text-sm font-bold uppercase tracking-wide text-foreground">
-              Trend Kehadiran per Bulan
-            </h2>
-            <div className="mt-4">
-              <AttendanceTrendChart records={allRecords} />
-            </div>
-            <div className="mt-3 flex items-center justify-center gap-4 text-[10px] font-bold uppercase tracking-wide text-muted">
-              <span className="flex items-center gap-1.5">
-                <span className="inline-block h-2.5 w-4 rounded-sm bg-accent/20" />
-                Jumlah Catatan
-              </span>
-              <span className="flex items-center gap-1.5">
-                <span className="inline-block h-0.5 w-4 rounded bg-accent" />
-                % Kehadiran
-              </span>
-            </div>
-          </div>
-        </div>
+        <StatsView
+          stats={stats}
+          records={records}
+          filters={filters}
+          onFiltersChange={setFilters}
+          dailySummaries={dailySummaries}
+          genSummaries={genSummaries}
+          onOpenTableMode={() => setViewMode("table")}
+          onStudentDetail={setStudentDetail}
+          getGenBadgeColor={activeGenBadgeColor}
+        />
       )}
 
       {/* Delete modal */}

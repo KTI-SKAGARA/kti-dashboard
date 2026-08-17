@@ -390,6 +390,70 @@ export async function fetchRecords(
   return data;
 }
 
+// ---------------------------------------------------------------------------
+// Query + Pagination (PRD P2-6)
+// Google Sheets tidak punya query language, jadi paging dilakukan di data layer
+// atas dataset yang sudah di-cache server-side (recordsCache, TTL 15s).
+// Data yang dikirim ke client hanya satu halaman (pageSize), bukan seluruh sheet.
+// ---------------------------------------------------------------------------
+
+export interface RecordsQuery {
+  kelas?: string;
+  bulan?: string; // MM-YYYY
+  tanggal?: string; // DD/MM/YYYY
+  status?: StatusAbsen;
+  search?: string; // substring nama (case-insensitive)
+}
+
+export interface RecordsPageResult {
+  records: (AttendanceRecord & { _gen: Gen })[];
+  total: number;
+}
+
+/**
+ * Ambil satu halaman records untuk sekumpulan gen, dengan filter + sorting
+ * yang konsisten dengan UI lama (gen asc → kelas terbanyak → nama asc).
+ */
+export async function queryRecords(
+  gens: Gen[],
+  query: RecordsQuery,
+  page: number,
+  pageSize: number
+): Promise<RecordsPageResult> {
+  const all = await Promise.all(gens.map((g) => fetchRecords(g)));
+  const tagged = gens.flatMap((g, i) =>
+    all[i].map((r) => ({ ...r, _gen: g }))
+  );
+
+  let result = tagged;
+  if (query.kelas) result = result.filter((r) => r.kelas === query.kelas);
+  if (query.bulan) result = result.filter((r) => r.bulanTahun === query.bulan);
+  if (query.tanggal) result = result.filter((r) => r.tanggal === query.tanggal);
+  if (query.status) result = result.filter((r) => r.statusAbsen === query.status);
+  if (query.search) {
+    const q = query.search.toLowerCase();
+    result = result.filter((r) => r.nama.toLowerCase().includes(q));
+  }
+
+  const kelasCount = new Map<string, number>();
+  for (const r of result) {
+    kelasCount.set(r.kelas, (kelasCount.get(r.kelas) || 0) + 1);
+  }
+
+  const sorted = [...result].sort((a, b) => {
+    const genCmp = Number(a._gen) - Number(b._gen);
+    if (genCmp !== 0) return genCmp;
+    const aCount = kelasCount.get(a.kelas) || 0;
+    const bCount = kelasCount.get(b.kelas) || 0;
+    if (aCount !== bCount) return bCount - aCount;
+    return a.nama.localeCompare(b.nama, "id");
+  });
+
+  const total = sorted.length;
+  const records = sorted.slice((page - 1) * pageSize, page * pageSize);
+  return { records, total };
+}
+
 export async function appendRecord(
   gen: Gen,
   record: AttendanceRecord
