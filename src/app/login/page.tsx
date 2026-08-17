@@ -1,41 +1,56 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
 import { loginAdmin } from "@/app/actions/auth";
-import { KeyRound, Eye, EyeOff, Loader2, AlertCircle } from "lucide-react";
+import {
+  Mail,
+  KeyRound,
+  Eye,
+  EyeOff,
+  Loader2,
+  AlertCircle,
+} from "lucide-react";
 
 export default function LoginPage() {
+  const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
-  const router = useRouter();
 
   useEffect(() => {
-    if (window.location.search.includes("err=config")) {
-      setError("Konfigurasi server belum lengkap (SESSION_SECRET belum di-set). Hubungi admin.");
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("err") === "config") {
+      setError(
+        "Konfigurasi server belum lengkap (Supabase belum di-set). Hubungi admin."
+      );
+    } else if (params.get("err") === "inactive") {
+      setError("Akun tidak aktif. Hubungi admin untuk mengaktifkan akun Anda.");
     }
   }, []);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!password.trim()) {
-      setError("Masukkan password admin terlebih dahulu.");
+    if (!email.trim()) {
+      setError("Masukkan email terlebih dahulu.");
+      return;
+    }
+    if (!password) {
+      setError("Masukkan password terlebih dahulu.");
       return;
     }
 
     setSubmitting(true);
     setError("");
 
-    const res = await loginAdmin(password);
+    const res = await loginAdmin(email, password);
 
     setSubmitting(false);
 
     if (res.success) {
       window.location.href = "/";
     } else {
-      setError(res.error || "Password salah!");
+      setError(res.error || "Login gagal!");
     }
   };
 
@@ -57,25 +72,51 @@ export default function LoginPage() {
         </div>
 
         <form onSubmit={handleLogin} className="card p-6 shadow-lg space-y-4">
+          {/* Email */}
           <div>
-            <label htmlFor="admin-password" className="label">
+            <label htmlFor="email" className="label">
+              Email
+            </label>
+            <div className="relative">
+              <Mail className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted" />
+              <input
+                id="email"
+                type="email"
+                autoComplete="email"
+                className={`input pl-9 ${
+                  error ? "!border-danger focus:!ring-danger/20" : ""
+                }`}
+                placeholder="admin@skagara.sch.id"
+                value={email}
+                onChange={(e) => {
+                  setEmail(e.target.value);
+                  if (error) setError("");
+                }}
+                autoFocus
+              />
+            </div>
+          </div>
+
+          {/* Password */}
+          <div>
+            <label htmlFor="password" className="label">
               Password
             </label>
             <div className="relative">
               <KeyRound className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted" />
               <input
-                id="admin-password"
+                id="password"
                 type={showPassword ? "text" : "password"}
+                autoComplete="current-password"
                 className={`input pl-9 pr-10 ${
                   error ? "!border-danger focus:!ring-danger/20" : ""
                 }`}
-                placeholder="Masukkan password admin..."
+                placeholder="Masukkan password..."
                 value={password}
                 onChange={(e) => {
                   setPassword(e.target.value);
                   if (error) setError("");
                 }}
-                autoFocus
               />
               <button
                 type="button"
@@ -90,13 +131,14 @@ export default function LoginPage() {
                 )}
               </button>
             </div>
-            {error && (
-              <p className="mt-2 flex items-center gap-1.5 text-xs font-bold text-danger">
-                <AlertCircle className="h-3.5 w-3.5 shrink-0" />
-                {error}
-              </p>
-            )}
           </div>
+
+          {error && (
+            <p className="flex items-center gap-1.5 text-xs font-bold text-danger">
+              <AlertCircle className="h-3.5 w-3.5 shrink-0" />
+              {error}
+            </p>
+          )}
 
           <button
             type="submit"

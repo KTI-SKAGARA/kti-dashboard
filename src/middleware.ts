@@ -1,41 +1,42 @@
-import { NextResponse } from "next/server";
-import type { NextRequest } from "next/server";
-import { SESSION_SECRET, COOKIE_NAME } from "@/lib/constants";
+import { type NextRequest } from "next/server";
+import { updateSession } from "@/lib/supabase/middleware";
 
-export function middleware(request: NextRequest) {
+export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
-  const session = request.cookies.get(COOKIE_NAME);
-  const isAuthenticated = session?.value === SESSION_SECRET;
 
-  // Konfigurasi session belum di-set: blokir semua akses kecuali /login
-  // (yang akan menampilkan pesan error), supaya tidak ada akses tanpa auth
-  // atau session yang bisa ditebak (PRD §4.6).
-  if (!SESSION_SECRET && pathname !== "/login") {
-    const loginUrl = new URL("/login?err=config", request.url);
-    return NextResponse.redirect(loginUrl);
-  }
-
-  // Allow login page, logout endpoint, static files, and _next internal requests
+  // Allow public routes
   if (
     pathname.startsWith("/login") ||
     pathname.startsWith("/api/auth/logout") ||
     pathname.startsWith("/_next") ||
-    pathname.startsWith("/favicon.ico")
+    pathname.startsWith("/favicon.ico") ||
+    pathname.startsWith("/logo-kti") ||
+    pathname.startsWith("/manifest") ||
+    pathname.startsWith("/sw.js") ||
+    pathname.startsWith("/file.svg") ||
+    pathname.startsWith("/globe.svg")
   ) {
-    // If already authenticated and trying to access /login, redirect to dashboard /
-    if (pathname === "/login" && isAuthenticated) {
-      return NextResponse.redirect(new URL("/", request.url));
+    const { supabaseResponse, user } = await updateSession(request);
+    // If already authenticated and trying to access /login, redirect to dashboard
+    if (pathname === "/login" && user) {
+      const url = request.nextUrl.clone();
+      url.pathname = "/";
+      return Response.redirect(url);
     }
-    return NextResponse.next();
+    return supabaseResponse;
   }
+
+  // Check Supabase session — refresh kalau expired
+  const { supabaseResponse, user } = await updateSession(request);
 
   // If not authenticated, redirect to /login
-  if (!isAuthenticated) {
-    const loginUrl = new URL("/login", request.url);
-    return NextResponse.redirect(loginUrl);
+  if (!user) {
+    const loginUrl = request.nextUrl.clone();
+    loginUrl.pathname = "/login";
+    return Response.redirect(loginUrl);
   }
 
-  return NextResponse.next();
+  return supabaseResponse;
 }
 
 export const config = {

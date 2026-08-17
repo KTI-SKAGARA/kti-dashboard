@@ -4,9 +4,10 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { useTheme } from "next-themes";
-import { logoutAdmin } from "@/app/actions/auth";
+import { logoutAdmin, getCurrentUser } from "@/app/actions/auth";
 import { getAppConfig } from "@/app/actions/attendance";
 import { APP_NAME, SCHOOL_NAME } from "@/lib/constants";
+import ChangePasswordModal from "@/components/ChangePasswordModal";
 import {
   LogOut,
   PlusCircle,
@@ -21,6 +22,7 @@ import {
   Users,
   CalendarDays,
   FlaskConical,
+  KeyRound,
 } from "lucide-react";
 
 export default function Navbar() {
@@ -31,6 +33,8 @@ export default function Navbar() {
   const [mounted, setMounted] = useState(false);
   const [loggingOut, setLoggingOut] = useState(false);
   const [mockMode, setMockMode] = useState(false);
+  const [userEmail, setUserEmail] = useState<string | null>(null);
+  const [changePwOpen, setChangePwOpen] = useState(false);
 
   useEffect(() => {
     setMounted(true);
@@ -42,6 +46,16 @@ export default function Navbar() {
       if (!cancelled && res.success && res.data) {
         setMockMode(res.data.mockMode);
       }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    getCurrentUser().then((user) => {
+      if (!cancelled && user) setUserEmail(user.email);
     });
     return () => {
       cancelled = true;
@@ -143,6 +157,15 @@ export default function Navbar() {
                 <ThemeIcon className="h-4 w-4" />
               </button>
 
+              {/* Ganti Password */}
+              <button
+                onClick={() => setChangePwOpen(true)}
+                className="btn btn-ghost min-h-[44px] px-2.5 py-2"
+                title="Ganti password"
+              >
+                <KeyRound className="h-4 w-4" />
+              </button>
+
               {/* Logout Button */}
               <button
                 onClick={handleLogout}
@@ -211,9 +234,17 @@ export default function Navbar() {
               <LogOut className="h-4 w-4" />
               {loggingOut ? "Keluar..." : "Logout"}
             </button>
+            {userEmail && (
+              <p className="px-4 pb-2 text-[10px] font-bold uppercase tracking-widest text-muted">
+                {userEmail}
+              </p>
+            )}
           </nav>
         </div>
       )}
+
+      {/* Ganti password modal */}
+      {changePwOpen && <ChangePasswordModal onClose={() => setChangePwOpen(false)} />}
     </header>
   );
 }
