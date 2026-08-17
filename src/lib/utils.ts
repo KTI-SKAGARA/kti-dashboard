@@ -72,6 +72,15 @@ export function normalizeName(nama: string): string {
 }
 
 /**
+ * Normalize a class label: uppercase + collapse duplicate spaces,
+ * tanpa validasi kaku terhadap daftar kelas (DATA_MODEL 3.2)
+ * agar tidak memblokir kelas baru gen mendatang.
+ */
+export function normalizeKelas(kelas: string): string {
+  return kelas.trim().replace(/\s+/g, " ").toUpperCase();
+}
+
+/**
  * Mask a full name for display on public-facing pages (privacy).
  * e.g. "MUHAMMAD RIZKY PRATAMA" -> "MUHAMMAD P." / "AHMAD" -> "A***"
  */

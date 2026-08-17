@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { loginAdmin } from "@/app/actions/auth";
 import { KeyRound, Eye, EyeOff, Loader2, AlertCircle } from "lucide-react";
@@ -11,6 +11,12 @@ export default function LoginPage() {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
   const router = useRouter();
+
+  useEffect(() => {
+    if (window.location.search.includes("err=config")) {
+      setError("Konfigurasi server belum lengkap (SESSION_SECRET belum di-set). Hubungi admin.");
+    }
+  }, []);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();

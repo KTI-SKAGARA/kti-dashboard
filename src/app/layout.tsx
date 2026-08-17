@@ -3,6 +3,7 @@ import "./globals.css";
 import Navbar from "@/components/Navbar";
 import ThemeProvider from "@/components/ThemeProvider";
 import SWRegister from "@/components/SWRegister";
+import { AttendanceDataProvider } from "@/hooks/useAttendanceData";
 
 export const metadata: Metadata = {
   title: "KTI SKAGARA — Absensi & Kas (SMK Negeri 3 Jepara)",
@@ -41,10 +42,12 @@ export default function RootLayout({
       <body className="min-h-screen antialiased">
         <ThemeProvider>
           <SWRegister />
-          <Navbar />
-          <main className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
-            {children}
-          </main>
+          <AttendanceDataProvider>
+            <Navbar />
+            <main className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
+              {children}
+            </main>
+          </AttendanceDataProvider>
         </ThemeProvider>
       </body>
     </html>

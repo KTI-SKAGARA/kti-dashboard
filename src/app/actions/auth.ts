@@ -10,6 +10,13 @@ import {
 
 export async function loginAdmin(password: string): Promise<{ success: boolean; error?: string }> {
   try {
+    if (!SESSION_SECRET) {
+      return {
+        success: false,
+        error: "Konfigurasi session belum di-set (SESSION_SECRET). Hubungi admin.",
+      };
+    }
+
     const input = (password || "").trim();
     const envPass = (process.env.ADMIN_PASSWORD || "").trim();
     const defaultPass = DEFAULT_ADMIN_PASSWORD.trim();

@@ -3,22 +3,22 @@
 import { useEffect, useState, useCallback, useMemo } from "react";
 import {
   type Gen,
-  type AttendanceRecord,
   type FilterState,
   type FilterOptions,
   type DashboardStats,
   type GenConfig,
   type StatusAbsen,
+  type TaggedRecord,
   SKAGARA_CLASSES,
 } from "@/types/attendance";
 import {
-  getAttendanceRecords,
   deleteAttendanceRecord,
   deleteBatchAttendanceRecords,
   updateAttendanceRecord,
   moveBatchAttendanceRecords,
   getGenList,
 } from "@/app/actions/attendance";
+import { useTaggedRecords, useAttendanceData } from "@/hooks/useAttendanceData";
 import {
   formatRupiah,
   formatBulanTahun,
@@ -62,8 +62,6 @@ import ProgressBarRow from "@/components/ProgressBarRow";
 import AttendanceTrendChart from "@/components/AttendanceTrendChart";
 import AttendanceCalendar from "@/components/AttendanceCalendar";
 
-type TaggedRecord = AttendanceRecord & { _gen: Gen; _rawIdx: number };
-
 export default function DashboardPage() {
   const [viewMode, setViewMode] = useState<"table" | "calendar" | "stats">("table");
 
@@ -78,24 +76,22 @@ export default function DashboardPage() {
     search: "",
   });
 
-  const [allRecords, setAllRecords] = useState<TaggedRecord[]>([]);
-  const [loading, setLoading] = useState(true);
   const [page, setPage] = useState(1);
 
   // Single Delete modal
   const [deleteModal, setDeleteModal] = useState<{
     open: boolean;
-    index: number;
+    rowId: string;
     record: TaggedRecord | null;
-  }>({ open: false, index: -1, record: null });
+  }>({ open: false, rowId: "", record: null });
   const [deleting, setDeleting] = useState(false);
 
   // Edit modal
   const [editModal, setEditModal] = useState<{
     open: boolean;
-    index: number;
+    rowId: string;
     record: TaggedRecord | null;
-  }>({ open: false, index: -1, record: null });
+  }>({ open: false, rowId: "", record: null });
   const [editGen, setEditGen] = useState<Gen>("");
   const [editTanggal, setEditTanggal] = useState("");
   const [editNama, setEditNama] = useState("");
@@ -147,47 +143,24 @@ export default function DashboardPage() {
     loadGenList();
   }, [loadGenList]);
 
-  // Load records from data layer (fast & cached)
-  const loadRecords = useCallback(async () => {
-    setLoading(true);
-    try {
-      const tagged: TaggedRecord[] = [];
+  // Shared data layer: fetch + cache per Gen, dipakai lintas route (PRD §4.1)
+  const gensToLoad = useMemo(
+    () => (filters.gen === "semua" ? iterGens : [filters.gen as Gen]),
+    [filters.gen, iterGens]
+  );
+  const { records: allRecords, loading, refresh: loadRecords } = useTaggedRecords(gensToLoad);
+  const { invalidate: invalidateRecordsCache } = useAttendanceData();
 
-      if (filters.gen === "semua") {
-        const results = await Promise.all(
-          iterGens.map((g) => getAttendanceRecords(g))
-        );
-        iterGens.forEach((g, i) => {
-          if (results[i].success && results[i].data) {
-            results[i].data!.forEach((r, idx) =>
-              tagged.push({ ...r, _gen: g, _rawIdx: idx })
-            );
-          }
-        });
-      } else {
-        const res = await getAttendanceRecords(filters.gen);
-        if (res.success && res.data) {
-          res.data.forEach((r, idx) =>
-            tagged.push({ ...r, _gen: filters.gen as Gen, _rawIdx: idx })
-          );
-        }
-      }
+  // Setelah operasi tulis: invalidate cache client + refetch paksa (server sudah fresh)
+  const reloadAll = useCallback(() => {
+    invalidateRecordsCache();
+    return loadRecords({ force: true });
+  }, [invalidateRecordsCache, loadRecords]);
 
-      setAllRecords(tagged);
-      setPage(1);
-    } catch {
-      setAllRecords([]);
-    } finally {
-      setLoading(false);
-    }
-  }, [filters.gen, iterGens]);
-
-  // Load data on Gen change or showLulus toggle
+  // Reset page when filters change
   useEffect(() => {
-    if (iterGens.length > 0) {
-      loadRecords();
-    }
-  }, [filters.gen, iterGens, loadRecords]);
+    setPage(1);
+  }, [filters.gen, filters.kelas, filters.bulan, filters.tanggal, filters.status, filters.search]);
 
   // In-memory Filter Options derived directly from allRecords (Instant 0ms calculation)
   const filterOptions = useMemo<FilterOptions>(() => {
@@ -377,14 +350,14 @@ export default function DashboardPage() {
 
   // Delete single record handler
   const confirmDeleteRecord = async () => {
-    if (deleteModal.index < 0 || !deleteModal.record) return;
+    if (!deleteModal.rowId || !deleteModal.record) return;
     setDeleting(true);
     try {
-      const res = await deleteAttendanceRecord(deleteModal.record._gen, deleteModal.index);
+      const res = await deleteAttendanceRecord(deleteModal.record._gen, deleteModal.rowId);
       if (res.success) {
         setToast({ type: "success", message: "Catatan absensi berhasil dihapus." });
-        setDeleteModal({ open: false, index: -1, record: null });
-        loadRecords();
+        setDeleteModal({ open: false, rowId: "", record: null });
+        reloadAll();
       } else {
         setToast({ type: "error", message: res.error || "Gagal menghapus data." });
       }
@@ -398,7 +371,7 @@ export default function DashboardPage() {
 
   // Edit handler
   const openEditModal = (record: TaggedRecord) => {
-    setEditModal({ open: true, index: record._rawIdx, record });
+    setEditModal({ open: true, rowId: record._rowId, record });
     setEditGen(record._gen);
     setEditTanggal(formatTanggalToISO(record.tanggal) || getTodayISO());
     setEditNama(record.nama);
@@ -408,11 +381,11 @@ export default function DashboardPage() {
   };
 
   const confirmEditRecord = async () => {
-    if (editModal.index < 0 || !editModal.record) return;
+    if (!editModal.rowId || !editModal.record) return;
     setEditing(true);
     try {
       const targetGenChanged = editGen && editGen !== editModal.record._gen;
-      const res = await updateAttendanceRecord(editModal.record._gen, editModal.index, {
+      const res = await updateAttendanceRecord(editModal.record._gen, editModal.rowId, {
         nama: editNama.toUpperCase(),
         kelas: editKelas,
         statusAbsen: editStatus,
@@ -425,8 +398,8 @@ export default function DashboardPage() {
           ? ` dan dipindahkan dari Gen ${editModal.record._gen} ke Gen ${editGen}`
           : "";
         setToast({ type: "success", message: `Data berhasil diupdate${movedNotice}!` });
-        setEditModal({ open: false, index: -1, record: null });
-        loadRecords();
+        setEditModal({ open: false, rowId: "", record: null });
+        reloadAll();
       } else {
         setToast({ type: "error", message: res.error || "Gagal mengupdate data." });
       }
@@ -450,29 +423,29 @@ export default function DashboardPage() {
     if (selectedKeys.size === 0) return;
     setBulkDeleting(true);
 
-    const grouped = new Map<Gen, number[]>();
+    const grouped = new Map<Gen, string[]>();
     for (const record of records) {
-      const key = `${record._gen}|${record._rawIdx}`;
+      const key = `${record._gen}|${record._rowId}`;
       if (selectedKeys.has(key)) {
         const arr = grouped.get(record._gen) || [];
-        arr.push(record._rawIdx);
+        arr.push(record._rowId);
         grouped.set(record._gen, arr);
       }
     }
 
     try {
       let allOk = true;
-      for (const [gen, indexes] of grouped) {
-        const res = await deleteBatchAttendanceRecords(gen, indexes);
+      for (const [gen, rowIds] of grouped) {
+        const res = await deleteBatchAttendanceRecords(gen, rowIds);
         if (!res.success) allOk = false;
       }
       if (allOk) {
         setToast({ type: "success", message: `${selectedKeys.size} catatan berhasil dihapus.` });
         setSelectedKeys(new Set());
-        loadRecords();
+        reloadAll();
       } else {
         setToast({ type: "error", message: "Gagal menghapus beberapa data." });
-        loadRecords();
+        reloadAll();
       }
     } catch {
       setToast({ type: "error", message: "Gagal menghapus data." });
@@ -488,12 +461,12 @@ export default function DashboardPage() {
     if (selectedKeys.size === 0 || !bulkMoveTargetGen) return;
     setBulkMoving(true);
 
-    const grouped = new Map<Gen, number[]>();
+    const grouped = new Map<Gen, string[]>();
     for (const record of records) {
-      const key = `${record._gen}|${record._rawIdx}`;
+      const key = `${record._gen}|${record._rowId}`;
       if (selectedKeys.has(key)) {
         const arr = grouped.get(record._gen) || [];
-        arr.push(record._rawIdx);
+        arr.push(record._rowId);
         grouped.set(record._gen, arr);
       }
     }
@@ -502,15 +475,15 @@ export default function DashboardPage() {
       let totalMoved = 0;
       let allOk = true;
 
-      for (const [fromGen, indexes] of grouped) {
+      for (const [fromGen, rowIds] of grouped) {
         if (fromGen === bulkMoveTargetGen) continue;
         const res = await moveBatchAttendanceRecords(
           fromGen,
-          indexes,
+          rowIds,
           bulkMoveTargetGen
         );
         if (res.success) {
-          totalMoved += res.data?.moved ?? indexes.length;
+          totalMoved += res.data?.moved ?? rowIds.length;
         } else {
           allOk = false;
         }
@@ -523,10 +496,10 @@ export default function DashboardPage() {
         });
         setSelectedKeys(new Set());
         setBulkMoveModal(false);
-        loadRecords();
+        reloadAll();
       } else {
         setToast({ type: "error", message: "Sebagian catatan gagal dipindahkan." });
-        loadRecords();
+        reloadAll();
       }
     } catch {
       setToast({ type: "error", message: "Gagal memindahkan catatan ke Gen baru." });
@@ -549,7 +522,7 @@ export default function DashboardPage() {
     if (selectedKeys.size === paginatedRecords.length) {
       setSelectedKeys(new Set());
     } else {
-      const keys = paginatedRecords.map((r) => `${r._gen}|${r._rawIdx}`);
+      const keys = paginatedRecords.map((r) => `${r._gen}|${r._rowId}`);
       setSelectedKeys(new Set(keys));
     }
   };
@@ -1165,7 +1138,7 @@ export default function DashboardPage() {
             )}
             <button
               onClick={() => {
-                loadRecords();
+                reloadAll();
               }}
               className="btn btn-ghost min-h-[44px] min-w-[44px] px-2 py-2"
               title="Muat ulang data"
@@ -1249,14 +1222,14 @@ export default function DashboardPage() {
                   <tbody>
                     {paginatedRecords.map((r, i) => {
                       return (
-                        <tr key={`${r._gen}-${r.tanggal}-${r.nama}-${r._rawIdx}`}>
+                        <tr key={`${r._gen}-${r.tanggal}-${r.nama}-${r._rowId}`}>
                           <td>
                             <button
-                              onClick={() => toggleSelectRecord(`${r._gen}|${r._rawIdx}`)}
+                              onClick={() => toggleSelectRecord(`${r._gen}|${r._rowId}`)}
                               className="btn btn-ghost min-h-[44px] min-w-[44px] p-2"
                               title="Pilih"
                             >
-                              {selectedKeys.has(`${r._gen}|${r._rawIdx}`) ? (
+                              {selectedKeys.has(`${r._gen}|${r._rowId}`) ? (
                                 <CheckSquare className="h-4 w-4 text-accent" />
                               ) : (
                                 <Square className="h-4 w-4" />
@@ -1324,7 +1297,7 @@ export default function DashboardPage() {
                                 onClick={() =>
                                   setDeleteModal({
                                     open: true,
-                                    index: r._rawIdx,
+                                    rowId: r._rowId,
                                     record: r,
                                   })
                                 }
@@ -1564,7 +1537,7 @@ export default function DashboardPage() {
                   </thead>
                   <tbody>
                     {records.map((r, i) => (
-                      <tr key={`${r._gen}-${r.nama}-${r._rawIdx}`}>
+                      <tr key={`${r._gen}-${r.nama}-${r._rowId}`}>
                         <td className="text-muted tabular-nums">{i + 1}</td>
                         <td className="font-medium uppercase text-foreground">
                           <button
@@ -1806,7 +1779,7 @@ export default function DashboardPage() {
           record={deleteModal.record}
           deleting={deleting}
           onConfirm={confirmDeleteRecord}
-          onCancel={() => setDeleteModal({ open: false, index: -1, record: null })}
+          onCancel={() => setDeleteModal({ open: false, rowId: "", record: null })}
         />
       )}
 
@@ -2054,7 +2027,7 @@ export default function DashboardPage() {
 
             <div className="mt-5 flex items-center justify-end gap-2">
               <button
-                onClick={() => setEditModal({ open: false, index: -1, record: null })}
+                onClick={() => setEditModal({ open: false, rowId: "", record: null })}
                 disabled={editing}
                 className="btn btn-secondary min-h-[44px] px-4 py-2 text-sm"
               >

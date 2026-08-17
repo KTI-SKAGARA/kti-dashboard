@@ -3,7 +3,9 @@ export const SCHOOL_NAME = "SMK Negeri 3 Jepara";
 export const APP_SUBTITLE = `${APP_NAME} — ${SCHOOL_NAME}`;
 
 export const COOKIE_NAME = "admin_session";
-export const SESSION_SECRET = process.env.SESSION_SECRET || "kti_skagara_secure_session_token_2026";
+// Wajib di-set via env SESSION_SECRET. Tanpa fallback hardcoded (PRD §4.6):
+// kalau kosong, middleware & login action akan menolak akses.
+export const SESSION_SECRET = process.env.SESSION_SECRET || "";
 
 export const DEFAULT_ADMIN_PASSWORD = "ktiskagara2026";
 

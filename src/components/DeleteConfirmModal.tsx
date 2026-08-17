@@ -1,9 +1,7 @@
 "use client";
 
 import { Loader2, AlertTriangle } from "lucide-react";
-import type { AttendanceRecord, Gen } from "@/types/attendance";
-
-type TaggedRecord = AttendanceRecord & { _gen: Gen; _rawIdx: number };
+import type { TaggedRecord } from "@/types/attendance";
 
 interface DeleteConfirmModalProps {
   record: TaggedRecord;

@@ -5,6 +5,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { useTheme } from "next-themes";
 import { logoutAdmin } from "@/app/actions/auth";
+import { getAppConfig } from "@/app/actions/attendance";
 import { APP_NAME, SCHOOL_NAME } from "@/lib/constants";
 import {
   LogOut,
@@ -19,6 +20,7 @@ import {
   BarChart3,
   Users,
   CalendarDays,
+  FlaskConical,
 } from "lucide-react";
 
 export default function Navbar() {
@@ -28,9 +30,22 @@ export default function Navbar() {
   const [mobileOpen, setMobileOpen] = useState(false);
   const [mounted, setMounted] = useState(false);
   const [loggingOut, setLoggingOut] = useState(false);
+  const [mockMode, setMockMode] = useState(false);
 
   useEffect(() => {
     setMounted(true);
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    getAppConfig().then((res) => {
+      if (!cancelled && res.success && res.data) {
+        setMockMode(res.data.mockMode);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   const handleLogout = () => {
@@ -107,6 +122,17 @@ export default function Navbar() {
                   </span>
                 </Link>
               ))}
+
+              {/* Mode Simulasi badge */}
+              {mockMode && (
+                <span
+                  className="badge border-amber-400/40 bg-amber-400/15 text-amber-600 dark:text-amber-300 font-bold"
+                  title="Google Sheets belum dikonfigurasi — data hanya tersimpan sementara di memori server dan hilang saat restart."
+                >
+                  <FlaskConical className="h-3 w-3" />
+                  Mode Simulasi
+                </span>
+              )}
 
               {/* Theme toggle */}
               <button

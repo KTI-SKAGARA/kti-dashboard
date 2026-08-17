@@ -91,6 +91,13 @@ export interface AttendanceRecord {
   statusAbsen: StatusAbsen;
   nominalKas: number;
   bulanTahun: string; // MM-YYYY
+  rowId?: string; // stable ID (kolom Row_ID di sheet), dipakai untuk semua operasi edit/delete
+}
+
+/** Record + konteks gen asal + ID stabil. Dipakai semua halaman & komponen (pengganti pola `_rawIdx` lokal). */
+export interface TaggedRecord extends AttendanceRecord {
+  _gen: Gen;
+  _rowId: string;
 }
 
 export interface StudentOption {

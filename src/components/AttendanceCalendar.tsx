@@ -2,8 +2,8 @@
 
 import { useState, useMemo } from "react";
 import {
-  type AttendanceRecord,
   type Gen,
+  type TaggedRecord,
 } from "@/types/attendance";
 import {
   formatRupiah,
@@ -18,8 +18,6 @@ import {
   Calendar as CalendarIcon,
   ArrowRight,
 } from "lucide-react";
-
-type TaggedRecord = AttendanceRecord & { _gen: Gen; _rawIdx: number };
 
 interface AttendanceCalendarProps {
   records: TaggedRecord[];
@@ -450,7 +448,7 @@ export default function AttendanceCalendar({
                   </thead>
                   <tbody>
                     {selectedRecords.map((r, i) => (
-                      <tr key={`${r._gen}-${r.nama}-${r._rawIdx}`}>
+                      <tr key={`${r._gen}-${r.nama}-${r._rowId}`}>
                         <td className="text-muted tabular-nums">{i + 1}</td>
                         <td className="font-medium uppercase text-foreground">
                           {r.nama}

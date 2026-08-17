@@ -7,6 +7,14 @@ export function middleware(request: NextRequest) {
   const session = request.cookies.get(COOKIE_NAME);
   const isAuthenticated = session?.value === SESSION_SECRET;
 
+  // Konfigurasi session belum di-set: blokir semua akses kecuali /login
+  // (yang akan menampilkan pesan error), supaya tidak ada akses tanpa auth
+  // atau session yang bisa ditebak (PRD §4.6).
+  if (!SESSION_SECRET && pathname !== "/login") {
+    const loginUrl = new URL("/login?err=config", request.url);
+    return NextResponse.redirect(loginUrl);
+  }
+
   // Allow login page, logout endpoint, static files, and _next internal requests
   if (
     pathname.startsWith("/login") ||

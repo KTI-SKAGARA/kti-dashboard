@@ -3,7 +3,6 @@
 import { useEffect, useState, useCallback, useMemo } from "react";
 import {
   type Gen,
-  type AttendanceRecord,
   type GenConfig,
 } from "@/types/attendance";
 import {
@@ -11,12 +10,11 @@ import {
   getMeetingDates,
   loadKegiatan,
 } from "@/types/kegiatan";
-import { getAttendanceRecords, getGenList } from "@/app/actions/attendance";
+import { getGenList } from "@/app/actions/attendance";
+import { useTaggedRecords } from "@/hooks/useAttendanceData";
 import { formatRupiah, getGenBadgeColor } from "@/lib/utils";
 import { Loader2, User, Search } from "lucide-react";
 import StudentDetailModal from "@/components/StudentDetailModal";
-
-type TaggedRecord = AttendanceRecord & { _gen: Gen; _rawIdx: number };
 
 interface StudentSummary {
   nama: string;
@@ -41,8 +39,6 @@ export default function IndividualStatsPage() {
   const [dateTo, setDateTo] = useState("");
   const [sortBy, setSortBy] = useState<"rate" | "absen" | "hadir" | "total">("rate");
   const [search, setSearch] = useState("");
-  const [allRecords, setAllRecords] = useState<TaggedRecord[]>([]);
-  const [loading, setLoading] = useState(true);
   const [studentDetail, setStudentDetail] = useState<string | null>(null);
   const [kegiatanList, setKegiatanList] = useState<Kegiatan[]>([]);
 
@@ -65,27 +61,14 @@ export default function IndividualStatsPage() {
     } catch {}
   }, []);
 
-  const loadRecords = useCallback(async () => {
-    setLoading(true);
-    try {
-      const gensToLoad = selectedGen === "semua" ? allGens : [selectedGen];
-      const results = await Promise.all(gensToLoad.map((g) => getAttendanceRecords(g)));
-      const tagged: TaggedRecord[] = [];
-      for (const res of results) {
-        if (res.success && res.data) {
-          const gen = gensToLoad[results.indexOf(res)];
-          res.data.forEach((r, i) =>
-            tagged.push({ ...r, _gen: gen, _rawIdx: i })
-          );
-        }
-      }
-      setAllRecords(tagged);
-    } catch {}
-    setLoading(false);
-  }, [selectedGen, allGens]);
+  // Shared data layer: cache per Gen lintas route (PRD §4.1)
+  const gensToLoad = useMemo(
+    () => (selectedGen === "semua" ? allGens : [selectedGen]),
+    [selectedGen, allGens]
+  );
+  const { records: allRecords, loading } = useTaggedRecords(gensToLoad);
 
   useEffect(() => { loadGenList(); }, [loadGenList]);
-  useEffect(() => { if (allGens.length > 0) loadRecords(); }, [loadRecords, allGens]);
 
   const kelasList = useMemo(() => {
     const set = new Set(allRecords.map((r) => r.kelas));

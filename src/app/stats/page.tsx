@@ -3,15 +3,16 @@
 import { useState, useCallback, useMemo, useEffect } from "react";
 import {
   type Gen,
-  type AttendanceRecord,
   type GenConfig,
+  type TaggedRecord,
 } from "@/types/attendance";
 import {
   type Kegiatan,
   getMeetingDates,
   loadKegiatan,
 } from "@/types/kegiatan";
-import { getAttendanceRecords, getGenList } from "@/app/actions/attendance";
+import { getGenList } from "@/app/actions/attendance";
+import { useTaggedRecords } from "@/hooks/useAttendanceData";
 import {
   formatRupiah,
   getGenBadgeColor,
@@ -21,8 +22,6 @@ import StatCard from "@/components/StatCard";
 import ProgressBarRow from "@/components/ProgressBarRow";
 import AttendanceTrendChart from "@/components/AttendanceTrendChart";
 
-type TaggedRecord = AttendanceRecord & { _gen: Gen; _rawIdx: number };
-
 export default function StatsPage() {
   const [genList, setGenList] = useState<GenConfig[]>([]);
   const [selectedGen, setSelectedGen] = useState<Gen>("semua");
@@ -30,10 +29,7 @@ export default function StatsPage() {
   const [selectedBulan, setSelectedBulan] = useState(""); // MM-YYYY
   const [dateFrom, setDateFrom] = useState(""); // DD/MM/YYYY
   const [dateTo, setDateTo] = useState(""); // DD/MM/YYYY
-  const [allRecords, setAllRecords] = useState<TaggedRecord[]>([]);
-  const [lulusRecords, setLulusRecords] = useState<TaggedRecord[]>([]);
   const [showLulus, setShowLulus] = useState(false);
-  const [loading, setLoading] = useState(true);
   const [kegiatanList, setKegiatanList] = useState<Kegiatan[]>([]);
 
   // Load kegiatan from localStorage
@@ -48,6 +44,11 @@ export default function StatsPage() {
     [genList]
   );
 
+  const lulusGens = useMemo(
+    () => genList.filter((g) => g.status === "lulus").map((g) => g.gen),
+    [genList]
+  );
+
   const loadGenList = useCallback(async () => {
     try {
       const res = await getGenList();
@@ -55,42 +56,15 @@ export default function StatsPage() {
     } catch {}
   }, []);
 
-  const loadRecords = useCallback(async () => {
-    setLoading(true);
-    try {
-      const gensToLoad = selectedGen === "semua" ? allGens : [selectedGen];
-      const results = await Promise.all(gensToLoad.map((g) => getAttendanceRecords(g)));
-      const tagged: TaggedRecord[] = [];
-      for (const res of results) {
-        if (res.success && res.data) {
-          const gen = gensToLoad[results.indexOf(res)];
-          res.data.forEach((r, i) =>
-            tagged.push({ ...r, _gen: gen, _rawIdx: i })
-          );
-        }
-      }
-      setAllRecords(tagged);
-    } catch {}
-    setLoading(false);
-  }, [selectedGen, allGens]);
-
-  const loadLulusRecords = useCallback(async () => {
-    const lulusGens = genList.filter((g) => g.status === "lulus").map((g) => g.gen);
-    if (lulusGens.length === 0) { setLulusRecords([]); return; }
-    const results = await Promise.all(lulusGens.map((g) => getAttendanceRecords(g)));
-    const tagged: TaggedRecord[] = [];
-    for (const res of results) {
-      if (res.success && res.data) {
-        const gen = lulusGens[results.indexOf(res)];
-        res.data.forEach((r, i) => tagged.push({ ...r, _gen: gen, _rawIdx: i }));
-      }
-    }
-    setLulusRecords(tagged);
-  }, [genList]);
+  // Shared data layer: cache per Gen lintas route (PRD §4.1)
+  const gensToLoad = useMemo(
+    () => (selectedGen === "semua" ? allGens : [selectedGen]),
+    [selectedGen, allGens]
+  );
+  const { records: allRecords, loading } = useTaggedRecords(gensToLoad);
+  const { records: lulusRecords } = useTaggedRecords(lulusGens);
 
   useEffect(() => { loadGenList(); }, [loadGenList]);
-  useEffect(() => { if (allGens.length > 0) loadRecords(); }, [loadRecords, allGens]);
-  useEffect(() => { if (genList.length > 0) loadLulusRecords(); }, [genList, loadLulusRecords]);
 
   const kelasList = useMemo(() => {
     const set = new Set(allRecords.map((r) => r.kelas));

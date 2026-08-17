@@ -2,9 +2,7 @@
 
 import { X, User, BookOpen, Coins, TrendingUp } from "lucide-react";
 import { formatRupiah } from "@/lib/utils";
-import type { AttendanceRecord, Gen, StatusAbsen } from "@/types/attendance";
-
-type TaggedRecord = AttendanceRecord & { _gen: Gen; _rawIdx: number };
+import type { TaggedRecord, StatusAbsen } from "@/types/attendance";
 
 interface StudentDetailModalProps {
   nama: string;

@@ -22,8 +22,23 @@ import {
   getGenConfig,
   ensureGenTab,
   markGenLulus,
+  isGoogleSheetsConfigured,
 } from "@/lib/google-sheets";
-import { getBulanTahunFromDate, normalizeName } from "@/lib/utils";
+import { getBulanTahunFromDate, normalizeKelas, normalizeName } from "@/lib/utils";
+
+// ---------------------------------------------------------------------------
+// Read: status konfigurasi aplikasi (mock mode indicator, PRD §4.7)
+// ---------------------------------------------------------------------------
+
+export async function getAppConfig(): Promise<
+  ApiResponse<{ mockMode: boolean }>
+> {
+  try {
+    return { success: true, data: { mockMode: !isGoogleSheetsConfigured() } };
+  } catch {
+    return { success: true, data: { mockMode: true } };
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Read: get gen list
@@ -275,7 +290,7 @@ export async function submitAttendanceRecord(formData: {
     const record: AttendanceRecord = {
       tanggal: formData.tanggal,
       nama: formattedNama,
-      kelas: formData.kelas.trim(),
+      kelas: normalizeKelas(formData.kelas),
       statusAbsen: formData.statusAbsen,
       nominalKas: formData.nominalKas,
       bulanTahun: getBulanTahunFromDate(formData.tanggal),
@@ -318,7 +333,7 @@ export async function submitBulkAttendance(
     const records: AttendanceRecord[] = entries.map((e) => ({
       tanggal,
       nama: normalizeName(e.nama),
-      kelas: kelas.trim(),
+      kelas: normalizeKelas(kelas),
       statusAbsen: e.statusAbsen,
       nominalKas: e.nominalKas,
       bulanTahun,
@@ -336,15 +351,18 @@ export async function submitBulkAttendance(
 }
 
 // ---------------------------------------------------------------------------
-// Delete: delete an attendance record by index
+// Delete: delete an attendance record by stable row ID
 // ---------------------------------------------------------------------------
 
 export async function deleteAttendanceRecord(
   gen: Gen,
-  recordIndex: number
+  rowId: string
 ): Promise<ApiResponse> {
   try {
-    await deleteRecord(gen, recordIndex);
+    if (!rowId) {
+      return { success: false, error: "ID data tidak valid." };
+    }
+    await deleteRecord(gen, rowId);
     return { success: true };
   } catch (error) {
     return {
@@ -355,15 +373,18 @@ export async function deleteAttendanceRecord(
 }
 
 // ---------------------------------------------------------------------------
-// Delete: batch delete attendance records by indexes
+// Delete: batch delete attendance records by stable row IDs
 // ---------------------------------------------------------------------------
 
 export async function deleteBatchAttendanceRecords(
   gen: Gen,
-  recordIndexes: number[]
+  rowIds: string[]
 ): Promise<ApiResponse> {
   try {
-    await deleteRecordsBatch(gen, recordIndexes);
+    if (!rowIds || rowIds.length === 0) {
+      return { success: false, error: "Tidak ada data yang dipilih." };
+    }
+    await deleteRecordsBatch(gen, rowIds);
     return { success: true };
   } catch (error) {
     return {
@@ -374,12 +395,12 @@ export async function deleteBatchAttendanceRecords(
 }
 
 // ---------------------------------------------------------------------------
-// Update: update an attendance record by index (supports moving Gen & changing date)
+// Update: update an attendance record by stable row ID (supports moving Gen & changing date)
 // ---------------------------------------------------------------------------
 
 export async function updateAttendanceRecord(
   gen: Gen,
-  recordIndex: number,
+  rowId: string,
   data: {
     nama?: string;
     kelas?: string;
@@ -390,6 +411,9 @@ export async function updateAttendanceRecord(
   }
 ): Promise<ApiResponse> {
   try {
+    if (!rowId) {
+      return { success: false, error: "ID data tidak valid." };
+    }
     if (data.nama !== undefined && !data.nama.trim()) {
       return { success: false, error: "Nama siswa tidak boleh kosong." };
     }
@@ -409,7 +433,11 @@ export async function updateAttendanceRecord(
       return { success: false, error: "Nominal kas harus berupa angka ≥ 0." };
     }
 
-    await updateRecord(gen, recordIndex, data);
+    const cleanData = { ...data };
+    if (cleanData.kelas !== undefined) cleanData.kelas = normalizeKelas(cleanData.kelas);
+    if (cleanData.nama !== undefined) cleanData.nama = normalizeName(cleanData.nama);
+
+    await updateRecord(gen, rowId, cleanData);
     return { success: true };
   } catch (error) {
     return {
@@ -420,12 +448,12 @@ export async function updateAttendanceRecord(
 }
 
 // ---------------------------------------------------------------------------
-// Move: batch move attendance records to another Gen
+// Move: batch move attendance records to another Gen (by stable row IDs)
 // ---------------------------------------------------------------------------
 
 export async function moveBatchAttendanceRecords(
   fromGen: Gen,
-  recordIndexes: number[],
+  rowIds: string[],
   targetGen: Gen
 ): Promise<ApiResponse<{ moved: number }>> {
   try {
@@ -435,12 +463,12 @@ export async function moveBatchAttendanceRecords(
     if (fromGen === targetGen) {
       return { success: false, error: "Target Gen harus berbeda dari Gen asal." };
     }
-    if (!recordIndexes || recordIndexes.length === 0) {
+    if (!rowIds || rowIds.length === 0) {
       return { success: false, error: "Tidak ada catatan yang dipilih untuk dipindahkan." };
     }
 
-    await moveRecordsBatch(fromGen, recordIndexes, targetGen);
-    return { success: true, data: { moved: recordIndexes.length } };
+    await moveRecordsBatch(fromGen, rowIds, targetGen);
+    return { success: true, data: { moved: rowIds.length } };
   } catch (error) {
     return {
       success: false,
