@@ -7,10 +7,23 @@ import {
   getGenTabName,
   CONFIG_TAB,
 } from "@/types/attendance";
-import { normalizeName, getBulanTahunFromDate } from "@/lib/utils";
+import { normalizeName, getBulanTahunFromDate, tanggalToNumber } from "@/lib/utils";
 import fs from "fs";
 import path from "path";
-import type { GoogleSpreadsheet, GoogleSpreadsheetRow } from "google-spreadsheet";
+import type { GoogleSpreadsheet, GoogleSpreadsheetRow, GoogleSpreadsheetWorksheet } from "google-spreadsheet";
+
+// ---------------------------------------------------------------------------
+// Stable row ID (kolom Row_ID) — pengganti index-based CRUD (lihat PRD §4.4)
+// ---------------------------------------------------------------------------
+
+function generateRowId(): string {
+  if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
+    return crypto.randomUUID();
+  }
+  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+const ROW_ID_COLUMN = "Row_ID";
 
 // ---------------------------------------------------------------------------
 // In-Memory Performance Cache (TTL)
@@ -45,13 +58,6 @@ const MOCK_GEN_CONFIG: GenConfig[] = MOCK_GENS.map((g) => ({
   status: "aktif" as const,
 }));
 
-const MOCK_DATA: AttendanceRecord[] = [];
-
-function getMockDataForGen(gen: Gen): AttendanceRecord[] {
-  const prefix = `${gen} `;
-  return MOCK_DATA.filter((r) => r.kelas.startsWith(prefix));
-}
-
 const mockAppended: Record<string, AttendanceRecord[]> = {};
 
 // ---------------------------------------------------------------------------
@@ -70,27 +76,33 @@ function getFormattedPrivateKey(): string {
   return key.replace(/\\n/g, "\n");
 }
 
+let _cachedCredentials: { email: string; key: string } | null = null;
+
 function getServiceAccountCredentials(): { email: string; key: string } {
+  if (_cachedCredentials) return _cachedCredentials;
+
   const jsonPath = path.join(process.cwd(), "service-account.json");
   if (fs.existsSync(jsonPath)) {
     try {
       const fileContent = fs.readFileSync(jsonPath, "utf-8");
       const parsed = JSON.parse(fileContent);
       if (parsed.client_email && parsed.private_key) {
-        return {
+        _cachedCredentials = {
           email: parsed.client_email,
           key: parsed.private_key.replace(/\\n/g, "\n"),
         };
+        return _cachedCredentials;
       }
     } catch (e) {
       console.warn("Error reading service-account.json:", e);
     }
   }
 
-  return {
+  _cachedCredentials = {
     email: process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL || "",
     key: getFormattedPrivateKey(),
   };
+  return _cachedCredentials;
 }
 
 export function isGoogleSheetsConfigured(): boolean {
@@ -163,8 +175,37 @@ async function getSheet(tabName: string, forceRefresh = false) {
 // Gen config management (CONFIG tab)
 // ---------------------------------------------------------------------------
 
-const HEADERS = ["Tanggal", "Nama", "Kelas", "Status_Absen", "Nominal_Kas", "Bulan_Tahun"];
+const HEADERS = ["Tanggal", "Nama", "Kelas", "Status_Absen", "Nominal_Kas", "Bulan_Tahun", ROW_ID_COLUMN];
 const CONFIG_HEADERS = ["Gen", "Status"];
+
+/**
+ * Pastikan kolom Row_ID ada di header sheet. Idempotent — aman dipanggil berulang.
+ */
+async function ensureRowIdHeader(sheet: GoogleSpreadsheetWorksheet): Promise<void> {
+  if (sheet.headerValues?.includes(ROW_ID_COLUMN)) return;
+
+  await sheet.loadCells("A1:G1");
+  const cell = sheet.getCell(0, 6);
+  cell.value = ROW_ID_COLUMN;
+  await sheet.saveUpdatedCells();
+}
+
+/**
+ * Backfill Row_ID untuk baris lama yang belum punya ID (migrasi sekali jalan,
+ * dijalankan otomatis saat fetchRecords menemukan baris tanpa ID).
+ */
+async function backfillRowIds(
+  sheet: GoogleSpreadsheetWorksheet,
+  rows: GoogleSpreadsheetRow[]
+): Promise<void> {
+  await ensureRowIdHeader(sheet);
+  for (const row of rows) {
+    if (!(row.get(ROW_ID_COLUMN) || "").trim()) {
+      row.set(ROW_ID_COLUMN, generateRowId());
+      await row.save();
+    }
+  }
+}
 
 export async function getGenConfig(): Promise<GenConfig[]> {
   if (!isGoogleSheetsConfigured()) {
@@ -304,6 +345,41 @@ export async function markGenLulus(gen: Gen, lulus: boolean): Promise<void> {
 }
 
 // ---------------------------------------------------------------------------
+// Admin: delete gen (hapus dari CONFIG + hapus tab sheet)
+// ---------------------------------------------------------------------------
+
+export async function deleteGen(gen: Gen): Promise<void> {
+  if (!isGoogleSheetsConfigured()) {
+    // Mock mode: hapus dari mock config
+    const idx = MOCK_GEN_CONFIG.findIndex((c) => c.gen === gen);
+    if (idx >= 0) MOCK_GEN_CONFIG.splice(idx, 1);
+    delete mockAppended[gen];
+    return;
+  }
+
+  const doc = await getDoc(true);
+
+  // 1. Hapus entry dari CONFIG tab
+  const configSheet = doc.sheetsByTitle[CONFIG_TAB];
+  if (configSheet) {
+    const rows: GoogleSpreadsheetRow[] = await configSheet.getRows();
+    const existing = rows.find((r: GoogleSpreadsheetRow) => r.get("Gen") === gen);
+    if (existing) {
+      await existing.delete();
+    }
+  }
+
+  // 2. Hapus tab sheet gen (jika ada)
+  const tabName = getGenTabName(gen);
+  const genSheet = doc.sheetsByTitle[tabName];
+  if (genSheet) {
+    await doc.deleteSheet(genSheet.sheetId);
+  }
+
+  invalidateCache();
+}
+
+// ---------------------------------------------------------------------------
 // Records CRUD with TTL Caching
 // ---------------------------------------------------------------------------
 
@@ -312,10 +388,7 @@ export async function fetchRecords(
   force = false
 ): Promise<AttendanceRecord[]> {
   if (!isGoogleSheetsConfigured()) {
-    return [
-      ...getMockDataForGen(gen),
-      ...(mockAppended[gen] || []),
-    ];
+    return [...(mockAppended[gen] || [])];
   }
 
   const now = Date.now();
@@ -328,26 +401,118 @@ export async function fetchRecords(
   const sheet = await getSheet(tabName);
   const rows: GoogleSpreadsheetRow[] = await sheet.getRows();
 
-  const data: AttendanceRecord[] = rows.map((row: GoogleSpreadsheetRow) => ({
-    tanggal: row.get("Tanggal") ?? "",
-    nama: normalizeName(row.get("Nama") ?? ""),
-    kelas: row.get("Kelas") ?? "",
-    statusAbsen: (row.get("Status_Absen") ?? "Hadir") as StatusAbsen,
-    nominalKas: Number(row.get("Nominal_Kas") ?? 0),
-    bulanTahun: row.get("Bulan_Tahun") ?? "",
-  }));
+  // Migrasi otomatis: isi Row_ID untuk baris lama yang belum punya ID
+  const missingIds = rows.filter((r) => !(r.get(ROW_ID_COLUMN) || "").trim());
+  if (missingIds.length > 0) {
+    try {
+      await backfillRowIds(sheet, rows);
+    } catch (e) {
+      console.warn(`Gagal backfill Row_ID untuk gen ${gen}:`, e);
+    }
+  }
+
+  const data: AttendanceRecord[] = rows.map((row: GoogleSpreadsheetRow) => {
+    const rawKas = Number(row.get("Nominal_Kas") ?? 0);
+    if (isNaN(rawKas) || !Number.isFinite(rawKas)) {
+      console.warn(`Nominal_Kas tidak valid pada gen ${gen} (${row.get("Nama")}): "${row.get("Nominal_Kas")}" — dianggap 0.`);
+    }
+    return {
+      tanggal: row.get("Tanggal") ?? "",
+      nama: normalizeName(row.get("Nama") ?? ""),
+      kelas: row.get("Kelas") ?? "",
+      statusAbsen: (row.get("Status_Absen") ?? "Hadir") as StatusAbsen,
+      nominalKas: isNaN(rawKas) || !Number.isFinite(rawKas) ? 0 : rawKas,
+      bulanTahun: row.get("Bulan_Tahun") ?? "",
+      rowId: (row.get(ROW_ID_COLUMN) || "").trim() || undefined,
+    };
+  });
 
   recordsCache.set(gen, { data, timestamp: now });
   return data;
+}
+
+// ---------------------------------------------------------------------------
+// Query + Pagination (PRD P2-6)
+// Google Sheets tidak punya query language, jadi paging dilakukan di data layer
+// atas dataset yang sudah di-cache server-side (recordsCache, TTL 15s).
+// Data yang dikirim ke client hanya satu halaman (pageSize), bukan seluruh sheet.
+// ---------------------------------------------------------------------------
+
+export interface RecordsQuery {
+  kelas?: string;
+  bulan?: string; // MM-YYYY
+  tanggal?: string; // DD/MM/YYYY (single date, legacy)
+  tanggalFrom?: string; // DD/MM/YYYY (inclusive)
+  tanggalTo?: string; // DD/MM/YYYY (inclusive)
+  status?: StatusAbsen;
+  search?: string; // substring nama (case-insensitive)
+}
+
+export interface RecordsPageResult {
+  records: (AttendanceRecord & { _gen: Gen })[];
+  total: number;
+}
+
+/**
+ * Ambil satu halaman records untuk sekumpulan gen, dengan filter + sorting
+ * yang konsisten dengan UI lama (gen asc → kelas terbanyak → nama asc).
+ */
+export async function queryRecords(
+  gens: Gen[],
+  query: RecordsQuery,
+  page: number,
+  pageSize: number
+): Promise<RecordsPageResult> {
+  const all = await Promise.all(gens.map((g) => fetchRecords(g)));
+  const tagged = gens.flatMap((g, i) =>
+    all[i].map((r) => ({ ...r, _gen: g }))
+  );
+
+  let result = tagged;
+  if (query.kelas) result = result.filter((r) => r.kelas === query.kelas);
+  if (query.bulan) result = result.filter((r) => r.bulanTahun === query.bulan);
+  if (query.tanggal) result = result.filter((r) => r.tanggal === query.tanggal);
+  if (query.tanggalFrom || query.tanggalTo) {
+    const fromNum = query.tanggalFrom ? tanggalToNumber(query.tanggalFrom) : -Infinity;
+    const toNum = query.tanggalTo ? tanggalToNumber(query.tanggalTo) : Infinity;
+    result = result.filter((r) => {
+      const t = tanggalToNumber(r.tanggal);
+      return !Number.isNaN(t) && t >= fromNum && t <= toNum;
+    });
+  }
+  if (query.status) result = result.filter((r) => r.statusAbsen === query.status);
+  if (query.search) {
+    const q = query.search.toLowerCase();
+    result = result.filter((r) => r.nama.toLowerCase().includes(q));
+  }
+
+  const kelasCount = new Map<string, number>();
+  for (const r of result) {
+    kelasCount.set(r.kelas, (kelasCount.get(r.kelas) || 0) + 1);
+  }
+
+  const sorted = [...result].sort((a, b) => {
+    const genCmp = Number(a._gen) - Number(b._gen);
+    if (genCmp !== 0) return genCmp;
+    const aCount = kelasCount.get(a.kelas) || 0;
+    const bCount = kelasCount.get(b.kelas) || 0;
+    if (aCount !== bCount) return bCount - aCount;
+    return a.nama.localeCompare(b.nama, "id");
+  });
+
+  const total = sorted.length;
+  const records = sorted.slice((page - 1) * pageSize, page * pageSize);
+  return { records, total };
 }
 
 export async function appendRecord(
   gen: Gen,
   record: AttendanceRecord
 ): Promise<void> {
-  const formattedRecord: AttendanceRecord = {
+  const formattedRecord: AttendanceRecord & { rowId: string } = {
     ...record,
     nama: normalizeName(record.nama),
+    rowId: record.rowId || generateRowId(),
   };
 
   if (!isGoogleSheetsConfigured()) {
@@ -366,6 +531,7 @@ export async function appendRecord(
     Status_Absen: formattedRecord.statusAbsen,
     Nominal_Kas: formattedRecord.nominalKas,
     Bulan_Tahun: formattedRecord.bulanTahun,
+    [ROW_ID_COLUMN]: formattedRecord.rowId,
   });
 
   invalidateCache(gen);
@@ -378,6 +544,7 @@ export async function appendRecords(
   const formatted = records.map((r) => ({
     ...r,
     nama: normalizeName(r.nama),
+    rowId: r.rowId || generateRowId(),
   }));
 
   if (!isGoogleSheetsConfigured()) {
@@ -396,6 +563,7 @@ export async function appendRecords(
     Status_Absen: r.statusAbsen,
     Nominal_Kas: r.nominalKas,
     Bulan_Tahun: r.bulanTahun,
+    [ROW_ID_COLUMN]: r.rowId,
   }));
 
   await sheet.addRows(rows);
@@ -404,16 +572,12 @@ export async function appendRecords(
 
 export async function deleteRecord(
   gen: Gen,
-  recordIndex: number
+  rowId: string
 ): Promise<void> {
   if (!isGoogleSheetsConfigured()) {
-    const mockList = getMockDataForGen(gen);
-    const mockLen = mockList.length;
-    if (recordIndex < mockLen) return;
-    const appendedIdx = recordIndex - mockLen;
-    if (mockAppended[gen] && appendedIdx >= 0 && appendedIdx < mockAppended[gen].length) {
-      mockAppended[gen].splice(appendedIdx, 1);
-    }
+    const list = mockAppended[gen] || [];
+    const idx = list.findIndex((r) => r.rowId === rowId);
+    if (idx >= 0) list.splice(idx, 1);
     return;
   }
 
@@ -421,28 +585,24 @@ export async function deleteRecord(
   const sheet = await getSheet(tabName);
   const rows: GoogleSpreadsheetRow[] = await sheet.getRows();
 
-  if (recordIndex >= 0 && recordIndex < rows.length) {
-    await rows[recordIndex].delete();
+  const row = rows.find((r) => (r.get(ROW_ID_COLUMN) || "").trim() === rowId);
+  if (row) {
+    await row.delete();
+  } else {
+    throw new Error("Data tidak ditemukan (mungkin sudah diubah/dihapus oleh admin lain).");
   }
   invalidateCache(gen);
 }
 
 export async function deleteRecordsBatch(
   gen: Gen,
-  recordIndexes: number[]
+  rowIds: string[]
 ): Promise<void> {
-  const sorted = [...recordIndexes].sort((a, b) => b - a);
+  const idSet = new Set(rowIds);
 
   if (!isGoogleSheetsConfigured()) {
-    const mockList = getMockDataForGen(gen);
-    const mockLen = mockList.length;
-    for (const idx of sorted) {
-      if (idx < mockLen) continue;
-      const appendedIdx = idx - mockLen;
-      if (mockAppended[gen] && appendedIdx >= 0 && appendedIdx < mockAppended[gen].length) {
-        mockAppended[gen].splice(appendedIdx, 1);
-      }
-    }
+    const list = mockAppended[gen] || [];
+    mockAppended[gen] = list.filter((r) => !idSet.has(r.rowId || ""));
     return;
   }
 
@@ -450,66 +610,47 @@ export async function deleteRecordsBatch(
   const sheet = await getSheet(tabName);
   const rows: GoogleSpreadsheetRow[] = await sheet.getRows();
 
-  for (const idx of sorted) {
-    if (idx >= 0 && idx < rows.length) {
-      await rows[idx].delete();
-    }
+  const rowsToDelete = rows.filter((r) =>
+    idSet.has((r.get(ROW_ID_COLUMN) || "").trim())
+  );
+  for (const row of rowsToDelete) {
+    await row.delete();
   }
   invalidateCache(gen);
 }
 
 export async function updateRecord(
   gen: Gen,
-  recordIndex: number,
+  rowId: string,
   data: Partial<AttendanceRecord> & { targetGen?: Gen }
 ): Promise<void> {
   const targetGen = data.targetGen && data.targetGen !== gen ? data.targetGen : null;
 
   if (!isGoogleSheetsConfigured()) {
-    const mockList = getMockDataForGen(gen);
-    const mockLen = mockList.length;
-    let targetRecord: AttendanceRecord | null = null;
+    const list = mockAppended[gen] || [];
+    const idx = list.findIndex((r) => r.rowId === rowId);
+    if (idx < 0) throw new Error("Data tidak ditemukan.");
+    const targetRecord = { ...list[idx] };
 
-    if (recordIndex < mockLen) {
-      targetRecord = { ...mockList[recordIndex] };
-    } else {
-      const appendedIdx = recordIndex - mockLen;
-      if (mockAppended[gen] && appendedIdx >= 0 && appendedIdx < mockAppended[gen].length) {
-        targetRecord = { ...mockAppended[gen][appendedIdx] };
-      }
+    if (data.nama !== undefined) targetRecord.nama = normalizeName(data.nama);
+    if (data.kelas !== undefined) targetRecord.kelas = data.kelas;
+    if (data.statusAbsen !== undefined) targetRecord.statusAbsen = data.statusAbsen;
+    if (data.nominalKas !== undefined) targetRecord.nominalKas = data.nominalKas;
+    if (data.tanggal !== undefined) {
+      targetRecord.tanggal = data.tanggal;
+      targetRecord.bulanTahun =
+        data.bulanTahun ||
+        (targetRecord.tanggal
+          ? getBulanTahunFromDate(targetRecord.tanggal)
+          : targetRecord.bulanTahun);
     }
 
-    if (targetRecord) {
-      if (data.nama !== undefined) targetRecord.nama = normalizeName(data.nama);
-      if (data.kelas !== undefined) targetRecord.kelas = data.kelas;
-      if (data.statusAbsen !== undefined) targetRecord.statusAbsen = data.statusAbsen;
-      if (data.nominalKas !== undefined) targetRecord.nominalKas = data.nominalKas;
-      if (data.tanggal !== undefined) {
-        targetRecord.tanggal = data.tanggal;
-        targetRecord.bulanTahun =
-          data.bulanTahun ||
-          (targetRecord.tanggal
-            ? getBulanTahunFromDate(targetRecord.tanggal)
-            : targetRecord.bulanTahun);
-      }
-
-      if (targetGen) {
-        if (!mockAppended[targetGen]) mockAppended[targetGen] = [];
-        mockAppended[targetGen].push(targetRecord);
-        if (recordIndex >= mockLen) {
-          const appendedIdx = recordIndex - mockLen;
-          mockAppended[gen]?.splice(appendedIdx, 1);
-        }
-      } else {
-        if (recordIndex < mockLen) {
-          mockList[recordIndex] = targetRecord;
-        } else {
-          const appendedIdx = recordIndex - mockLen;
-          if (mockAppended[gen] && appendedIdx >= 0 && appendedIdx < mockAppended[gen].length) {
-            mockAppended[gen][appendedIdx] = targetRecord;
-          }
-        }
-      }
+    if (targetGen) {
+      if (!mockAppended[targetGen]) mockAppended[targetGen] = [];
+      mockAppended[targetGen].push(targetRecord);
+      list.splice(idx, 1);
+    } else {
+      list[idx] = targetRecord;
     }
     return;
   }
@@ -518,51 +659,54 @@ export async function updateRecord(
   const sheet = await getSheet(tabName);
   const rows: GoogleSpreadsheetRow[] = await sheet.getRows();
 
-  if (recordIndex >= 0 && recordIndex < rows.length) {
-    const row = rows[recordIndex];
-    const existingTanggal = row.get("Tanggal") ?? "";
-    const existingNama = row.get("Nama") ?? "";
-    const existingKelas = row.get("Kelas") ?? "";
-    const existingStatus = (row.get("Status_Absen") ?? "Hadir") as StatusAbsen;
-    const existingKas = Number(row.get("Nominal_Kas") ?? 0);
-    const existingBulan = row.get("Bulan_Tahun") ?? "";
+  const row = rows.find((r) => (r.get(ROW_ID_COLUMN) || "").trim() === rowId);
+  if (!row) {
+    throw new Error("Data tidak ditemukan (mungkin sudah diubah/dihapus oleh admin lain).");
+  }
 
-    const finalTanggal = data.tanggal !== undefined ? data.tanggal : existingTanggal;
-    const finalNama = data.nama !== undefined ? normalizeName(data.nama) : existingNama;
-    const finalKelas = data.kelas !== undefined ? data.kelas : existingKelas;
-    const finalStatus = data.statusAbsen !== undefined ? data.statusAbsen : existingStatus;
-    const finalKas = data.nominalKas !== undefined ? data.nominalKas : existingKas;
-    const finalBulan =
-      data.bulanTahun !== undefined
-        ? data.bulanTahun
-        : data.tanggal
-        ? getBulanTahunFromDate(finalTanggal)
-        : existingBulan;
+  const existingTanggal = row.get("Tanggal") ?? "";
+  const existingNama = row.get("Nama") ?? "";
+  const existingKelas = row.get("Kelas") ?? "";
+  const existingStatus = (row.get("Status_Absen") ?? "Hadir") as StatusAbsen;
+  const existingKas = Number(row.get("Nominal_Kas") ?? 0);
+  const existingBulan = row.get("Bulan_Tahun") ?? "";
 
-    if (targetGen) {
-      await ensureGenTab(targetGen);
-      const targetSheet = await getSheet(getGenTabName(targetGen));
-      await targetSheet.addRow({
-        Tanggal: finalTanggal,
-        Nama: finalNama,
-        Kelas: finalKelas,
-        Status_Absen: finalStatus,
-        Nominal_Kas: finalKas,
-        Bulan_Tahun: finalBulan,
-      });
-      await row.delete();
-      invalidateCache(targetGen);
-    } else {
-      if (data.nama !== undefined) row.set("Nama", finalNama);
-      if (data.kelas !== undefined) row.set("Kelas", finalKelas);
-      if (data.statusAbsen !== undefined) row.set("Status_Absen", finalStatus);
-      if (data.nominalKas !== undefined) row.set("Nominal_Kas", String(finalKas));
-      if (data.tanggal !== undefined) {
-        row.set("Tanggal", finalTanggal);
-        row.set("Bulan_Tahun", finalBulan);
-      }
-      await row.save();
+  const finalTanggal = data.tanggal !== undefined ? data.tanggal : existingTanggal;
+  const finalNama = data.nama !== undefined ? normalizeName(data.nama) : existingNama;
+  const finalKelas = data.kelas !== undefined ? data.kelas : existingKelas;
+  const finalStatus = data.statusAbsen !== undefined ? data.statusAbsen : existingStatus;
+  const finalKas = data.nominalKas !== undefined ? data.nominalKas : existingKas;
+  const finalBulan =
+    data.bulanTahun !== undefined
+      ? data.bulanTahun
+      : data.tanggal
+      ? getBulanTahunFromDate(finalTanggal)
+      : existingBulan;
+
+  if (targetGen) {
+    await ensureGenTab(targetGen);
+    const targetSheet = await getSheet(getGenTabName(targetGen));
+    await targetSheet.addRow({
+      Tanggal: finalTanggal,
+      Nama: finalNama,
+      Kelas: finalKelas,
+      Status_Absen: finalStatus,
+      Nominal_Kas: finalKas,
+      Bulan_Tahun: finalBulan,
+      [ROW_ID_COLUMN]: (row.get(ROW_ID_COLUMN) || "").trim() || generateRowId(),
+    });
+    await row.delete();
+    invalidateCache(targetGen);
+  } else {
+    if (data.nama !== undefined) row.set("Nama", finalNama);
+    if (data.kelas !== undefined) row.set("Kelas", finalKelas);
+    if (data.statusAbsen !== undefined) row.set("Status_Absen", finalStatus);
+    if (data.nominalKas !== undefined) row.set("Nominal_Kas", String(finalKas));
+    if (data.tanggal !== undefined) {
+      row.set("Tanggal", finalTanggal);
+      row.set("Bulan_Tahun", finalBulan);
     }
+    await row.save();
   }
 
   invalidateCache(gen);
@@ -570,33 +714,23 @@ export async function updateRecord(
 
 export async function moveRecordsBatch(
   fromGen: Gen,
-  recordIndexes: number[],
+  rowIds: string[],
   targetGen: Gen
 ): Promise<void> {
-  if (fromGen === targetGen || recordIndexes.length === 0) return;
+  if (fromGen === targetGen || rowIds.length === 0) return;
 
-  const sorted = [...recordIndexes].sort((a, b) => b - a);
+  const idSet = new Set(rowIds);
 
   if (!isGoogleSheetsConfigured()) {
-    const mockList = getMockDataForGen(fromGen);
-    const mockLen = mockList.length;
     if (!mockAppended[targetGen]) mockAppended[targetGen] = [];
-
-    for (const idx of sorted) {
-      let record: AttendanceRecord | null = null;
-      if (idx < mockLen) {
-        record = { ...mockList[idx] };
-      } else {
-        const appendedIdx = idx - mockLen;
-        if (mockAppended[fromGen] && appendedIdx >= 0 && appendedIdx < mockAppended[fromGen].length) {
-          record = mockAppended[fromGen][appendedIdx];
-          mockAppended[fromGen].splice(appendedIdx, 1);
-        }
+    const source = mockAppended[fromGen] || [];
+    mockAppended[fromGen] = source.filter((r) => {
+      if (idSet.has(r.rowId || "")) {
+        mockAppended[targetGen].push(r);
+        return false;
       }
-      if (record) {
-        mockAppended[targetGen].push(record);
-      }
-    }
+      return true;
+    });
     return;
   }
 
@@ -606,37 +740,24 @@ export async function moveRecordsBatch(
   await ensureGenTab(targetGen);
   const targetSheet = await getSheet(getGenTabName(targetGen));
 
-  const recordsToMove: AttendanceRecord[] = [];
-  const rowsToDelete: GoogleSpreadsheetRow[] = [];
-
-  for (const idx of sorted) {
-    if (idx >= 0 && idx < rows.length) {
-      const row = rows[idx];
-      recordsToMove.push({
-        tanggal: row.get("Tanggal") ?? "",
-        nama: normalizeName(row.get("Nama") ?? ""),
-        kelas: row.get("Kelas") ?? "",
-        statusAbsen: (row.get("Status_Absen") ?? "Hadir") as StatusAbsen,
-        nominalKas: Number(row.get("Nominal_Kas") ?? 0),
-        bulanTahun: row.get("Bulan_Tahun") ?? "",
-      });
-      rowsToDelete.push(row);
-    }
-  }
+  const recordsToMove = rows.filter((r) =>
+    idSet.has((r.get(ROW_ID_COLUMN) || "").trim())
+  );
 
   if (recordsToMove.length > 0) {
     await targetSheet.addRows(
       recordsToMove.map((r) => ({
-        Tanggal: r.tanggal,
-        Nama: r.nama,
-        Kelas: r.kelas,
-        Status_Absen: r.statusAbsen,
-        Nominal_Kas: r.nominalKas,
-        Bulan_Tahun: r.bulanTahun,
+        Tanggal: r.get("Tanggal") ?? "",
+        Nama: normalizeName(r.get("Nama") ?? ""),
+        Kelas: r.get("Kelas") ?? "",
+        Status_Absen: (r.get("Status_Absen") ?? "Hadir") as StatusAbsen,
+        Nominal_Kas: Number(r.get("Nominal_Kas") ?? 0),
+        Bulan_Tahun: r.get("Bulan_Tahun") ?? "",
+        [ROW_ID_COLUMN]: (r.get(ROW_ID_COLUMN) || "").trim() || generateRowId(),
       }))
     );
 
-    for (const row of rowsToDelete) {
+    for (const row of recordsToMove) {
       await row.delete();
     }
   }

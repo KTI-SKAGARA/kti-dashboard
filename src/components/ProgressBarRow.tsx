@@ -13,12 +13,12 @@ export default function ProgressBarRow({
   return (
     <div>
       <div className="flex items-center justify-between text-xs">
-        <span className="font-bold uppercase tracking-wide text-foreground">{label}</span>
+        <span className="font-semibold uppercase tracking-wide text-foreground">{label}</span>
         <span className="text-muted tabular-nums">
           {count} ({pct}%)
         </span>
       </div>
-      <div className="mt-1.5 h-2.5 w-full rounded-full bg-border">
+      <div className="mt-1.5 h-2 w-full rounded-full bg-border">
         <div className={`h-full rounded-full ${fillClass}`} style={{ width: `${pct}%` }} />
       </div>
     </div>

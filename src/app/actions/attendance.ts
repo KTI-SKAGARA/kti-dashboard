@@ -4,6 +4,7 @@ import {
   type Gen,
   type GenConfig,
   type AttendanceRecord,
+  type TaggedRecord,
   type StatusAbsen,
   type FilterOptions,
   type DashboardStats,
@@ -13,6 +14,7 @@ import {
 } from "@/types/attendance";
 import {
   fetchRecords,
+  queryRecords,
   appendRecord,
   appendRecords,
   deleteRecord,
@@ -22,8 +24,34 @@ import {
   getGenConfig,
   ensureGenTab,
   markGenLulus,
+  isGoogleSheetsConfigured,
 } from "@/lib/google-sheets";
-import { getBulanTahunFromDate, normalizeName } from "@/lib/utils";
+import { getBulanTahunFromDate, normalizeKelas, normalizeName } from "@/lib/utils";
+import { createClient } from "@/lib/supabase/server";
+import { requireAdmin as requireAdminBase } from "@/lib/supabase/auth-helpers";
+
+// ---------------------------------------------------------------------------
+// Helper: cek apakah user adalah admin (untuk write actions)
+// ---------------------------------------------------------------------------
+
+async function requireAdmin(): Promise<{ ok: boolean; error?: string }> {
+  const result = await requireAdminBase();
+  return { ok: result.ok, error: result.error };
+}
+
+// ---------------------------------------------------------------------------
+// Read: status konfigurasi aplikasi (mock mode indicator, PRD §4.7)
+// ---------------------------------------------------------------------------
+
+export async function getAppConfig(): Promise<
+  ApiResponse<{ mockMode: boolean }>
+> {
+  try {
+    return { success: true, data: { mockMode: !isGoogleSheetsConfigured() } };
+  } catch {
+    return { success: true, data: { mockMode: true } };
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Read: get gen list
@@ -60,6 +88,58 @@ export async function getAttendanceRecords(
 }
 
 // ---------------------------------------------------------------------------
+// Read: query + pagination lintas gen (PRD P2-6)
+// Hanya satu halaman yang dikirim ke client; filter/sort di data layer.
+// ---------------------------------------------------------------------------
+
+export async function getAttendanceRecordsPage(
+  gen: Gen | "semua",
+  page: number,
+  pageSize: number,
+  query?: {
+    kelas?: string;
+    bulan?: string;
+    tanggal?: string;
+    tanggalFrom?: string; // DD/MM/YYYY
+    tanggalTo?: string; // DD/MM/YYYY
+    status?: StatusAbsen;
+    search?: string;
+  }
+): Promise<ApiResponse<{ records: TaggedRecord[]; total: number }>> {
+  try {
+    let gens: Gen[];
+    if (gen === "semua") {
+      const config = await getGenConfig();
+      gens = config.filter((g) => g.status === "aktif").map((g) => g.gen);
+    } else {
+      gens = [gen];
+    }
+
+    if (gens.length === 0) {
+      return { success: true, data: { records: [], total: 0 } };
+    }
+
+    const safePage = Math.max(1, Math.floor(page) || 1);
+    const safePageSize = Math.max(1, Math.min(500, Math.floor(pageSize) || 20));
+
+    const { records, total } = await queryRecords(gens, query || {}, safePage, safePageSize);
+
+    const tagged: TaggedRecord[] = records.map((r) => ({
+      ...r,
+      _gen: r._gen,
+      _rowId: r.rowId || `tmp-${r._gen}-${r.tanggal}-${r.nama}`,
+    }));
+
+    return { success: true, data: { records: tagged, total } };
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : "Gagal mengambil data.",
+    };
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Read: get unique student list (in UPPERCASE)
 // ---------------------------------------------------------------------------
 
@@ -75,6 +155,27 @@ export async function getExistingStudents(
       if (upperName && !studentMap.has(upperName)) {
         studentMap.set(upperName, r.kelas);
       }
+    }
+
+    // Merge with student_profiles (Supabase) — prefer profile's current class
+    try {
+      const supabase = await createClient();
+      const { data: profiles } = await supabase
+        .from("student_profiles")
+        .select("nama, kelas")
+        .eq("gen", gen);
+
+      if (profiles) {
+        for (const p of profiles) {
+          const upperName = normalizeName(p.nama || "");
+          if (upperName && p.kelas) {
+            // Prefer profile class (current class) over record-derived class
+            studentMap.set(upperName, p.kelas);
+          }
+        }
+      }
+    } catch {
+      // student_profiles may not exist yet (migration not run) — fallback to records only
     }
 
     const students: StudentOption[] = Array.from(studentMap.entries())
@@ -247,6 +348,9 @@ export async function submitAttendanceRecord(formData: {
   nominalKas: number;
 }): Promise<ApiResponse> {
   try {
+    const auth = await requireAdmin();
+    if (!auth.ok) return { success: false, error: auth.error };
+
     const formattedNama = formData.nama ? normalizeName(formData.nama) : "";
 
     if (!formattedNama) {
@@ -275,7 +379,7 @@ export async function submitAttendanceRecord(formData: {
     const record: AttendanceRecord = {
       tanggal: formData.tanggal,
       nama: formattedNama,
-      kelas: formData.kelas.trim(),
+      kelas: normalizeKelas(formData.kelas),
       statusAbsen: formData.statusAbsen,
       nominalKas: formData.nominalKas,
       bulanTahun: getBulanTahunFromDate(formData.tanggal),
@@ -304,6 +408,9 @@ export async function submitBulkAttendance(
   entries: { nama: string; statusAbsen: StatusAbsen; nominalKas: number }[]
 ): Promise<ApiResponse<{ saved: number }>> {
   try {
+    const auth = await requireAdmin();
+    if (!auth.ok) return { success: false, error: auth.error };
+
     if (!kelas || kelas.trim().length === 0) {
       return { success: false, error: "Kelas wajib diisi." };
     }
@@ -318,7 +425,7 @@ export async function submitBulkAttendance(
     const records: AttendanceRecord[] = entries.map((e) => ({
       tanggal,
       nama: normalizeName(e.nama),
-      kelas: kelas.trim(),
+      kelas: normalizeKelas(kelas),
       statusAbsen: e.statusAbsen,
       nominalKas: e.nominalKas,
       bulanTahun,
@@ -336,15 +443,21 @@ export async function submitBulkAttendance(
 }
 
 // ---------------------------------------------------------------------------
-// Delete: delete an attendance record by index
+// Delete: delete an attendance record by stable row ID
 // ---------------------------------------------------------------------------
 
 export async function deleteAttendanceRecord(
   gen: Gen,
-  recordIndex: number
+  rowId: string
 ): Promise<ApiResponse> {
   try {
-    await deleteRecord(gen, recordIndex);
+    const auth = await requireAdmin();
+    if (!auth.ok) return { success: false, error: auth.error };
+
+    if (!rowId) {
+      return { success: false, error: "ID data tidak valid." };
+    }
+    await deleteRecord(gen, rowId);
     return { success: true };
   } catch (error) {
     return {
@@ -355,15 +468,21 @@ export async function deleteAttendanceRecord(
 }
 
 // ---------------------------------------------------------------------------
-// Delete: batch delete attendance records by indexes
+// Delete: batch delete attendance records by stable row IDs
 // ---------------------------------------------------------------------------
 
 export async function deleteBatchAttendanceRecords(
   gen: Gen,
-  recordIndexes: number[]
+  rowIds: string[]
 ): Promise<ApiResponse> {
   try {
-    await deleteRecordsBatch(gen, recordIndexes);
+    const auth = await requireAdmin();
+    if (!auth.ok) return { success: false, error: auth.error };
+
+    if (!rowIds || rowIds.length === 0) {
+      return { success: false, error: "Tidak ada data yang dipilih." };
+    }
+    await deleteRecordsBatch(gen, rowIds);
     return { success: true };
   } catch (error) {
     return {
@@ -374,12 +493,12 @@ export async function deleteBatchAttendanceRecords(
 }
 
 // ---------------------------------------------------------------------------
-// Update: update an attendance record by index (supports moving Gen & changing date)
+// Update: update an attendance record by stable row ID (supports moving Gen & changing date)
 // ---------------------------------------------------------------------------
 
 export async function updateAttendanceRecord(
   gen: Gen,
-  recordIndex: number,
+  rowId: string,
   data: {
     nama?: string;
     kelas?: string;
@@ -390,6 +509,12 @@ export async function updateAttendanceRecord(
   }
 ): Promise<ApiResponse> {
   try {
+    const auth = await requireAdmin();
+    if (!auth.ok) return { success: false, error: auth.error };
+
+    if (!rowId) {
+      return { success: false, error: "ID data tidak valid." };
+    }
     if (data.nama !== undefined && !data.nama.trim()) {
       return { success: false, error: "Nama siswa tidak boleh kosong." };
     }
@@ -409,7 +534,11 @@ export async function updateAttendanceRecord(
       return { success: false, error: "Nominal kas harus berupa angka ≥ 0." };
     }
 
-    await updateRecord(gen, recordIndex, data);
+    const cleanData = { ...data };
+    if (cleanData.kelas !== undefined) cleanData.kelas = normalizeKelas(cleanData.kelas);
+    if (cleanData.nama !== undefined) cleanData.nama = normalizeName(cleanData.nama);
+
+    await updateRecord(gen, rowId, cleanData);
     return { success: true };
   } catch (error) {
     return {
@@ -420,27 +549,30 @@ export async function updateAttendanceRecord(
 }
 
 // ---------------------------------------------------------------------------
-// Move: batch move attendance records to another Gen
+// Move: batch move attendance records to another Gen (by stable row IDs)
 // ---------------------------------------------------------------------------
 
 export async function moveBatchAttendanceRecords(
   fromGen: Gen,
-  recordIndexes: number[],
+  rowIds: string[],
   targetGen: Gen
 ): Promise<ApiResponse<{ moved: number }>> {
   try {
+    const auth = await requireAdmin();
+    if (!auth.ok) return { success: false, error: auth.error };
+
     if (!targetGen) {
       return { success: false, error: "Target Gen harus dipilih." };
     }
     if (fromGen === targetGen) {
       return { success: false, error: "Target Gen harus berbeda dari Gen asal." };
     }
-    if (!recordIndexes || recordIndexes.length === 0) {
+    if (!rowIds || rowIds.length === 0) {
       return { success: false, error: "Tidak ada catatan yang dipilih untuk dipindahkan." };
     }
 
-    await moveRecordsBatch(fromGen, recordIndexes, targetGen);
-    return { success: true, data: { moved: recordIndexes.length } };
+    await moveRecordsBatch(fromGen, rowIds, targetGen);
+    return { success: true, data: { moved: rowIds.length } };
   } catch (error) {
     return {
       success: false,
@@ -455,6 +587,9 @@ export async function moveBatchAttendanceRecords(
 
 export async function createGen(gen: string): Promise<ApiResponse> {
   try {
+    const auth = await requireAdmin();
+    if (!auth.ok) return { success: false, error: auth.error };
+
     if (!/^\d{1,2}$/.test(gen)) {
       return { success: false, error: "Format gen tidak valid. Masukkan angka 1-99." };
     }
@@ -484,12 +619,35 @@ export async function toggleGenStatus(
   lulus: boolean
 ): Promise<ApiResponse> {
   try {
+    const auth = await requireAdmin();
+    if (!auth.ok) return { success: false, error: auth.error };
+
     await markGenLulus(gen, lulus);
     return { success: true };
   } catch (error) {
     return {
       success: false,
       error: error instanceof Error ? error.message : "Gagal mengubah status gen.",
+    };
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Admin: delete gen (hapus tab + config)
+// ---------------------------------------------------------------------------
+
+export async function deleteGenAction(gen: Gen): Promise<ApiResponse> {
+  try {
+    const auth = await requireAdmin();
+    if (!auth.ok) return { success: false, error: auth.error };
+
+    const { deleteGen } = await import("@/lib/google-sheets");
+    await deleteGen(gen);
+    return { success: true };
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : "Gagal menghapus gen.",
     };
   }
 }

@@ -3,6 +3,7 @@ import "./globals.css";
 import Navbar from "@/components/Navbar";
 import ThemeProvider from "@/components/ThemeProvider";
 import SWRegister from "@/components/SWRegister";
+import { AttendanceDataProvider } from "@/hooks/useAttendanceData";
 
 export const metadata: Metadata = {
   title: "KTI SKAGARA — Absensi & Kas (SMK Negeri 3 Jepara)",
@@ -16,7 +17,7 @@ export const metadata: Metadata = {
 };
 
 export const viewport: Viewport = {
-  themeColor: "#ff548f",
+  themeColor: "#e8952e",
 };
 
 export default function RootLayout({
@@ -34,19 +35,19 @@ export default function RootLayout({
           crossOrigin="anonymous"
         />
         <link
-          href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Jost:wght@400;500;600;700;800&display=swap"
+          href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap"
           rel="stylesheet"
         />
       </head>
-      <body className="noise min-h-screen antialiased">
+      <body className="min-h-screen antialiased">
         <ThemeProvider>
           <SWRegister />
-          <div className="dot-grid pointer-events-none fixed inset-0 -z-10 opacity-40" />
-          <div className="grid-bg pointer-events-none fixed inset-0 -z-10" />
-          <Navbar />
-          <main className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
-            {children}
-          </main>
+          <AttendanceDataProvider>
+            <Navbar />
+            <main className="mx-auto max-w-7xl px-4 py-6 pb-24 sm:px-6 md:pb-6 lg:px-8">
+              {children}
+            </main>
+          </AttendanceDataProvider>
         </ThemeProvider>
       </body>
     </html>

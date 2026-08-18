@@ -2,8 +2,8 @@
 
 import { useState, useMemo } from "react";
 import {
-  type AttendanceRecord,
   type Gen,
+  type TaggedRecord,
 } from "@/types/attendance";
 import {
   formatRupiah,
@@ -18,8 +18,6 @@ import {
   Calendar as CalendarIcon,
   ArrowRight,
 } from "lucide-react";
-
-type TaggedRecord = AttendanceRecord & { _gen: Gen; _rawIdx: number };
 
 interface AttendanceCalendarProps {
   records: TaggedRecord[];
@@ -224,7 +222,7 @@ export default function AttendanceCalendar({
             <button
               type="button"
               onClick={jumpToToday}
-              className="btn btn-ghost min-h-[38px] px-3 py-1.5 text-xs font-bold text-accent"
+              className="btn btn-ghost min-h-[44px] px-3 py-1.5 text-xs font-bold text-accent"
               title="Lompat ke hari ini"
             >
               Hari Ini
@@ -232,7 +230,7 @@ export default function AttendanceCalendar({
             <button
               type="button"
               onClick={handlePrevMonth}
-              className="btn btn-secondary min-h-[38px] min-w-[38px] p-2"
+              className="btn btn-secondary min-h-[44px] min-w-[44px] p-2"
               aria-label="Bulan sebelumnya"
             >
               <ChevronLeft className="h-4 w-4" />
@@ -240,7 +238,7 @@ export default function AttendanceCalendar({
             <button
               type="button"
               onClick={handleNextMonth}
-              className="btn btn-secondary min-h-[38px] min-w-[38px] p-2"
+              className="btn btn-secondary min-h-[44px] min-w-[44px] p-2"
               aria-label="Bulan berikutnya"
             >
               <ChevronRight className="h-4 w-4" />
@@ -276,7 +274,7 @@ export default function AttendanceCalendar({
                 onClick={() => onSelectDate(cell.dateKey)}
                 className={`relative flex min-h-[68px] flex-col justify-between rounded-xl border-2 p-1.5 text-left transition-all sm:min-h-[76px] sm:p-2 ${
                   isSelected
-                    ? "border-accent bg-accent/20 hard-shadow-sm ring-2 ring-accent text-foreground font-extrabold"
+                    ? "border-accent bg-accent/20 ring-2 ring-accent text-foreground font-extrabold"
                     : hasMeeting
                     ? "border-accent/40 bg-surface hover:border-accent hover:bg-accent/5"
                     : cell.isCurrentMonth
@@ -341,7 +339,7 @@ export default function AttendanceCalendar({
 
       {/* Selected Date Inspector Card */}
       {selectedDate && (
-        <div className="card p-5 hard-shadow">
+        <div className="card p-5">
           <div className="flex flex-wrap items-center justify-between gap-3 border-b-2 border-border pb-3">
             <div>
               <p className="text-[10px] font-bold uppercase tracking-widest text-accent">
@@ -356,7 +354,7 @@ export default function AttendanceCalendar({
               <button
                 type="button"
                 onClick={() => onSelectDate("")}
-                className="btn btn-ghost min-h-[38px] px-3 py-1.5 text-xs font-bold"
+                className="btn btn-ghost min-h-[44px] px-3 py-1.5 text-xs font-bold"
               >
                 Tutup Pilihan
               </button>
@@ -364,7 +362,7 @@ export default function AttendanceCalendar({
                 <button
                   type="button"
                   onClick={onOpenTableMode}
-                  className="btn btn-primary min-h-[38px] px-3 py-1.5 text-xs font-bold"
+                  className="btn btn-primary min-h-[44px] px-3 py-1.5 text-xs font-bold"
                 >
                   <ArrowRight className="h-3.5 w-3.5" />
                   Buka di Mode Tabel
@@ -450,7 +448,7 @@ export default function AttendanceCalendar({
                   </thead>
                   <tbody>
                     {selectedRecords.map((r, i) => (
-                      <tr key={`${r._gen}-${r.nama}-${r._rawIdx}`}>
+                      <tr key={`${r._gen}-${r.nama}-${r._rowId}`}>
                         <td className="text-muted tabular-nums">{i + 1}</td>
                         <td className="font-medium uppercase text-foreground">
                           {r.nama}

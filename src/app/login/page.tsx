@@ -1,35 +1,56 @@
 "use client";
 
-import { useState } from "react";
-import { useRouter } from "next/navigation";
+import { useEffect, useState } from "react";
 import { loginAdmin } from "@/app/actions/auth";
-import { KeyRound, Eye, EyeOff, Loader2, AlertCircle } from "lucide-react";
+import {
+  Mail,
+  KeyRound,
+  Eye,
+  EyeOff,
+  Loader2,
+  AlertCircle,
+} from "lucide-react";
 
 export default function LoginPage() {
+  const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
-  const router = useRouter();
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("err") === "config") {
+      setError(
+        "Konfigurasi server belum lengkap (Supabase belum di-set). Hubungi admin."
+      );
+    } else if (params.get("err") === "inactive") {
+      setError("Akun tidak aktif. Hubungi admin untuk mengaktifkan akun Anda.");
+    }
+  }, []);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!password.trim()) {
-      setError("Masukkan password admin terlebih dahulu.");
+    if (!email.trim()) {
+      setError("Masukkan email terlebih dahulu.");
+      return;
+    }
+    if (!password) {
+      setError("Masukkan password terlebih dahulu.");
       return;
     }
 
     setSubmitting(true);
     setError("");
 
-    const res = await loginAdmin(password);
+    const res = await loginAdmin(email, password);
 
     setSubmitting(false);
 
     if (res.success) {
       window.location.href = "/";
     } else {
-      setError(res.error || "Password salah!");
+      setError(res.error || "Login gagal!");
     }
   };
 
@@ -50,31 +71,53 @@ export default function LoginPage() {
           </p>
         </div>
 
-        <form onSubmit={handleLogin} className="card p-6 hard-shadow space-y-4">
+        <form onSubmit={handleLogin} className="card p-6 shadow-lg space-y-4">
+          {/* Email */}
           <div>
-            <label htmlFor="admin-password" className="label">
+            <label htmlFor="email" className="label">
+              Email
+            </label>
+            <div className={`flex items-center gap-2 rounded-[0.375rem] border bg-surface px-3 py-2 transition-colors focus-within:shadow-[0_0_0_3px_color-mix(in_srgb,var(--color-accent)_12%,transparent)] ${error ? "border-danger focus-within:border-danger" : "border-border focus-within:border-accent"}`}>
+              <Mail className="h-4 w-4 shrink-0 text-muted" />
+              <input
+                id="email"
+                type="email"
+                autoComplete="email"
+                className="flex-1 min-w-0 bg-transparent text-sm text-foreground outline-none placeholder:text-muted"
+                placeholder="admin@skagara.sch.id"
+                value={email}
+                onChange={(e) => {
+                  setEmail(e.target.value);
+                  if (error) setError("");
+                }}
+                autoFocus
+              />
+            </div>
+          </div>
+
+          {/* Password */}
+          <div>
+            <label htmlFor="password" className="label">
               Password
             </label>
-            <div className="relative">
-              <KeyRound className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted" />
+            <div className={`flex items-center gap-2 rounded-[0.375rem] border bg-surface px-3 py-2 transition-colors focus-within:shadow-[0_0_0_3px_color-mix(in_srgb,var(--color-accent)_12%,transparent)] ${error ? "border-danger focus-within:border-danger" : "border-border focus-within:border-accent"}`}>
+              <KeyRound className="h-4 w-4 shrink-0 text-muted" />
               <input
-                id="admin-password"
+                id="password"
                 type={showPassword ? "text" : "password"}
-                className={`input pl-9 pr-10 ${
-                  error ? "!border-danger focus:!ring-danger/20" : ""
-                }`}
-                placeholder="Masukkan password admin..."
+                autoComplete="current-password"
+                className="flex-1 min-w-0 bg-transparent text-sm text-foreground outline-none placeholder:text-muted"
+                placeholder="Masukkan password..."
                 value={password}
                 onChange={(e) => {
                   setPassword(e.target.value);
                   if (error) setError("");
                 }}
-                autoFocus
               />
               <button
                 type="button"
                 onClick={() => setShowPassword(!showPassword)}
-                className="absolute right-2.5 top-1/2 -translate-y-1/2 p-1 text-muted hover:text-accent"
+                className="shrink-0 p-0.5 text-muted hover:text-accent"
                 aria-label="Tampilkan password"
               >
                 {showPassword ? (
@@ -84,13 +127,14 @@ export default function LoginPage() {
                 )}
               </button>
             </div>
-            {error && (
-              <p className="mt-2 flex items-center gap-1.5 text-xs font-bold text-danger">
-                <AlertCircle className="h-3.5 w-3.5 shrink-0" />
-                {error}
-              </p>
-            )}
           </div>
+
+          {error && (
+            <p className="flex items-center gap-1.5 text-xs font-bold text-danger">
+              <AlertCircle className="h-3.5 w-3.5 shrink-0" />
+              {error}
+            </p>
+          )}
 
           <button
             type="submit"

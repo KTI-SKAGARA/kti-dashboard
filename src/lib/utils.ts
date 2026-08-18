@@ -72,6 +72,15 @@ export function normalizeName(nama: string): string {
 }
 
 /**
+ * Normalize a class label: uppercase + collapse duplicate spaces,
+ * tanpa validasi kaku terhadap daftar kelas (DATA_MODEL 3.2)
+ * agar tidak memblokir kelas baru gen mendatang.
+ */
+export function normalizeKelas(kelas: string): string {
+  return kelas.trim().replace(/\s+/g, " ").toUpperCase();
+}
+
+/**
  * Mask a full name for display on public-facing pages (privacy).
  * e.g. "MUHAMMAD RIZKY PRATAMA" -> "MUHAMMAD P." / "AHMAD" -> "A***"
  */
@@ -132,6 +141,16 @@ export function formatTanggalToISO(tanggal: string): string {
   if (parts.length !== 3) return "";
   const [d, m, y] = parts;
   return `${y}-${m.padStart(2, "0")}-${d.padStart(2, "0")}`;
+}
+
+/**
+ * Convert a DD/MM/YYYY string into a sortable/comparable number (YYYYMMDD).
+ * Returns NaN for invalid input so range comparisons fail safely.
+ */
+export function tanggalToNumber(tanggal: string): number {
+  const [d, m, y] = tanggal.split("/").map(Number);
+  if (!d || !m || !y) return NaN;
+  return y * 10000 + m * 100 + d;
 }
 
 /**
@@ -202,4 +221,41 @@ export function getGenCardSelectedStyle(gen: string): string {
     return GEN_COLOR_PALETTES[idx].cardSelected;
   }
   return "border-accent bg-accent/10 text-accent font-extrabold ring-2 ring-accent/20";
+}
+
+// ---------------------------------------------------------------------------
+// Status badge colors (shared across all components)
+// ---------------------------------------------------------------------------
+
+export const STATUS_BADGE_CLASSES: Record<string, string> = {
+  Hadir: "bg-emerald-500/15 text-emerald-600 dark:text-emerald-300",
+  Sakit: "bg-amber-500/15 text-amber-600 dark:text-amber-300",
+  Izin: "bg-accent/15 text-accent",
+  Alfa: "bg-danger/15 text-danger",
+};
+
+export const STATUS_DOT_CLASSES: Record<string, string> = {
+  Hadir: "bg-emerald-500",
+  Sakit: "bg-amber-400",
+  Izin: "bg-accent",
+  Alfa: "bg-danger",
+};
+
+export const STATUS_PROGRESS_CLASSES: Record<string, string> = {
+  Hadir: "bg-emerald-500",
+  Sakit: "bg-amber-400",
+  Izin: "bg-accent",
+  Alfa: "bg-danger",
+};
+
+export function getStatusBadgeClass(status: string): string {
+  return STATUS_BADGE_CLASSES[status] || "bg-border text-muted";
+}
+
+export function getStatusDotClass(status: string): string {
+  return STATUS_DOT_CLASSES[status] || "bg-border";
+}
+
+export function getStatusProgressClass(status: string): string {
+  return STATUS_PROGRESS_CLASSES[status] || "bg-border";
 }

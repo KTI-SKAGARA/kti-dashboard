@@ -11,10 +11,10 @@ export default function Toast({ type, message }: ToastProps) {
   return (
     <div className="fixed bottom-6 right-6 z-50 max-w-[calc(100vw-3rem)]">
       <div
-        className={`flex items-center gap-2.5 rounded-xl border-2 px-4 py-3 text-sm font-bold shadow-[3px_3px_0_0_var(--color-shadow)] ${
+        className={`flex items-center gap-2.5 rounded-lg border px-4 py-3 text-sm font-semibold shadow-lg ${
           type === "success"
-            ? "border-emerald-500/40 bg-surface text-emerald-600 dark:text-emerald-300"
-            : "border-danger/40 bg-surface text-danger"
+            ? "border-emerald-500/30 bg-surface text-emerald-600 dark:text-emerald-300"
+            : "border-danger/30 bg-surface text-danger"
         }`}
       >
         {type === "success" ? (
