@@ -51,6 +51,8 @@ import TodayBanner from "@/components/dashboard/TodayBanner";
 import BulkDeleteModal from "@/components/dashboard/BulkDeleteModal";
 import BulkMoveModal from "@/components/dashboard/BulkMoveModal";
 import EditRecordModal from "@/components/dashboard/EditRecordModal";
+import FinanceSummaryCard from "@/components/finance/FinanceSummaryCard";
+import { getFinanceSummary } from "@/app/actions/finance";
 
 export default function DashboardPage() {
   const [viewMode, setViewMode] = useState<"absensi" | "rekap">("absensi");
@@ -122,6 +124,13 @@ export default function DashboardPage() {
   const [bulkMoveTargetGen, setBulkMoveTargetGen] = useState<Gen>("");
   const [bulkMoving, setBulkMoving] = useState(false);
 
+  // Finance summary (for dashboard card)
+  const [financeSummary, setFinanceSummary] = useState<{
+    totalIncome: number;
+    totalExpenses: number;
+    balance: number;
+  } | null>(null);
+
   const [studentDetail, setStudentDetail] = useState<string | null>(null);
 
   const [toast, setToast] = useState<{
@@ -159,6 +168,24 @@ export default function DashboardPage() {
   useEffect(() => {
     loadGenList();
   }, [loadGenList]);
+
+  // Finance summary for dashboard card
+  const loadFinance = useCallback(async (genList: GenConfig[]) => {
+    const gens = genList.filter((g) => g.status === "aktif").map((g) => g.gen as Gen);
+    if (gens.length === 0) return;
+    const res = await getFinanceSummary(gens);
+    if (res.success && res.data) {
+      setFinanceSummary({
+        totalIncome: res.data.totalIncome,
+        totalExpenses: res.data.totalExpenses,
+        balance: res.data.balance,
+      });
+    }
+  }, []);
+
+  useEffect(() => {
+    if (genList.length > 0) loadFinance(genList); // eslint-disable-line react-hooks/set-state-in-effect
+  }, [genList, loadFinance]);
 
   // Shared data layer: fetch + cache per Gen, dipakai lintas route (PRD §4.1)
   const gensToLoad = useMemo(
@@ -1034,6 +1061,19 @@ export default function DashboardPage() {
           }))
         }
       />
+
+      {/* Finance summary */}
+      {financeSummary && (
+        <div className="mb-4">
+          <Link href="/finance" className="block hover:opacity-90">
+            <FinanceSummaryCard
+              totalIncome={financeSummary.totalIncome}
+              totalExpenses={financeSummary.totalExpenses}
+              balance={financeSummary.balance}
+            />
+          </Link>
+        </div>
+      )}
 
       {/* Filters Toolbar */}
       <FilterBar

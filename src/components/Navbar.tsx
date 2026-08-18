@@ -19,6 +19,7 @@ import {
   CalendarDays,
   FlaskConical,
   KeyRound,
+  Wallet,
 } from "lucide-react";
 
 export default function Navbar() {
@@ -76,6 +77,7 @@ export default function Navbar() {
     { href: "/", label: "Dashboard", icon: LayoutDashboard },
     { href: "/input", label: "Input", icon: PlusCircle },
     { href: "/kalender", label: "Kalender", icon: CalendarDays },
+    { href: "/finance", label: "Keuangan", icon: Wallet },
     { href: "/admin", label: "Admin", icon: Settings, adminOnly: true },
   ];
 
