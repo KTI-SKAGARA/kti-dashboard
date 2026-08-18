@@ -31,13 +31,13 @@ const ROW_ID_COLUMN = "Row_ID";
 
 let cachedDoc: GoogleSpreadsheet | null = null;
 let docLoadedAt = 0;
-const DOC_TTL_MS = 60 * 1000; // 60 seconds
+const DOC_TTL_MS = 10 * 60 * 1000; // 10 minutes
 
 const recordsCache = new Map<
   string,
   { data: AttendanceRecord[]; timestamp: number }
 >();
-const RECORDS_TTL_MS = 15 * 1000; // 15 seconds
+const RECORDS_TTL_MS = 2 * 60 * 1000; // 2 minutes
 
 export function invalidateCache(gen?: Gen) {
   if (gen) {
