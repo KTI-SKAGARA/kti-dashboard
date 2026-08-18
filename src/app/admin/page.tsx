@@ -21,6 +21,7 @@ import {
   updateStudentClass,
   deleteStudentProfile,
   promoteGen,
+  bulkImportFromRecords,
 } from "@/app/actions/student-profiles";
 import { APP_NAME, TOAST_DURATION } from "@/lib/constants";
 import {
@@ -190,6 +191,31 @@ export default function AdminPage() {
       loadProfiles(selectedGenFilter || undefined);
     } else {
       setToast({ type: "error", message: res.error ?? "Gagal menghapus profil." });
+    }
+    setTimeout(() => setToast(null), TOAST_DURATION);
+  };
+
+  const handleImportFromRecords = async () => {
+    if (!selectedGenFilter) {
+      setToast({ type: "error", message: "Pilih Gen dulu untuk import." });
+      setTimeout(() => setToast(null), TOAST_DURATION);
+      return;
+    }
+    setSubmitting(true);
+    const res = await bulkImportFromRecords(selectedGenFilter);
+    setSubmitting(false);
+
+    if (res.success && res.data) {
+      const { imported, skipped } = res.data;
+      setToast({
+        type: "success",
+        message: imported > 0
+          ? `Berhasil import ${imported} siswa dari data absensi${skipped > 0 ? ` (${skipped} sudah ada)` : ""}.`
+          : `Tidak ada siswa baru (${skipped} profil sudah ada).`,
+      });
+      loadProfiles(selectedGenFilter || undefined);
+    } else {
+      setToast({ type: "error", message: res.error ?? "Gagal import siswa." });
     }
     setTimeout(() => setToast(null), TOAST_DURATION);
   };
@@ -708,7 +734,7 @@ export default function AdminPage() {
         </p>
 
         {/* Filter by Gen */}
-        <div className="mt-4 flex items-end gap-3">
+        <div className="mt-4 flex flex-wrap items-end gap-3">
           <div>
             <label className="label">Filter Gen</label>
             <select
@@ -722,6 +748,18 @@ export default function AdminPage() {
               ))}
             </select>
           </div>
+          <button
+            onClick={handleImportFromRecords}
+            disabled={submitting || !selectedGenFilter}
+            className="btn btn-primary min-h-[44px]"
+          >
+            {submitting ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <RotateCcw className="h-4 w-4" />
+            )}
+            <span>Import dari Absensi</span>
+          </button>
         </div>
 
         {/* Add new student */}

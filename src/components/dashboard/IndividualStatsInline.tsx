@@ -1,20 +1,13 @@
 "use client";
 
 import { useMemo, useState, useEffect } from "react";
-import { type Gen, type FilterState, type TaggedRecord, type StudentProfile } from "@/types/attendance";
-import {
-  getMeetingDates,
-  getLiburDates,
-} from "@/types/kegiatan";
+import { type Gen, type TaggedRecord, type StudentProfile } from "@/types/attendance";
+import { getLiburDates } from "@/types/kegiatan";
 import { getStudentProfiles } from "@/app/actions/student-profiles";
-import { getStatusBadgeClass } from "@/lib/utils";
 import { User } from "lucide-react";
-import StudentDetailModal from "@/components/StudentDetailModal";
 
 interface Props {
   allRecords: TaggedRecord[];
-  filters: FilterState;
-  onFiltersChange: (updater: (prev: FilterState) => FilterState) => void;
   getGenBadgeColor: (gen: Gen) => string;
   onStudentDetail: (nama: string) => void;
 }
@@ -31,8 +24,6 @@ interface StudentRow {
 
 export default function IndividualStatsInline({
   allRecords,
-  filters,
-  onFiltersChange,
   getGenBadgeColor,
   onStudentDetail,
 }: Props) {

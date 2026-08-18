@@ -56,6 +56,20 @@ export default function DashboardPage() {
   const [viewMode, setViewMode] = useState<"absensi" | "rekap">("absensi");
   const [rekapSubTab, setRekapSubTab] = useState<"ringkasan" | "siswa">("ringkasan");
 
+  // Bind URL params dari redirect /stats lama (?tab=rekap&sub=siswa), lalu bersihkan URL
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (!params.get("tab") && !params.get("sub")) return;
+    const t = setTimeout(() => {
+      if (params.get("tab") === "rekap") {
+        setViewMode("rekap");
+        if (params.get("sub") === "siswa") setRekapSubTab("siswa");
+      }
+      window.history.replaceState({}, "", window.location.pathname);
+    }, 0);
+    return () => clearTimeout(t);
+  }, []);
+
   const [genList, setGenList] = useState<GenConfig[]>([]);
 
   const [filters, setFilters] = useState<FilterState>({
@@ -1103,8 +1117,6 @@ export default function DashboardPage() {
           {rekapSubTab === "siswa" && (
             <IndividualStatsInline
               allRecords={allRecords}
-              filters={filters}
-              onFiltersChange={setFilters}
               getGenBadgeColor={activeGenBadgeColor}
               onStudentDetail={setStudentDetail}
             />

@@ -2,7 +2,8 @@
 
 import { createClient } from "@/lib/supabase/server";
 import { requireAdmin, requireOwner } from "@/lib/supabase/auth-helpers";
-import type { ApiResponse, StudentProfile } from "@/types/attendance";
+import { fetchRecords } from "@/lib/google-sheets";
+import type { ApiResponse, Gen, StudentProfile } from "@/types/attendance";
 
 /**
  * Fetch all student profiles, optionally filtered by gen.
@@ -62,7 +63,7 @@ export async function upsertStudentProfile(
 
 /**
  * Bulk import student profiles from existing attendance records.
- * Creates profiles for students who don't have one yet.
+ * Creates profiles for students who don't have one yet (latest kelas per student).
  */
 export async function bulkImportFromRecords(gen: string): Promise<ApiResponse<{ imported: number; skipped: number }>> {
   const auth = await requireAdmin();
@@ -70,24 +71,56 @@ export async function bulkImportFromRecords(gen: string): Promise<ApiResponse<{ 
 
   const supabase = await createClient();
 
-  // Fetch all records for this gen
-  // We need to use the google-sheets data, but since this is a server action,
-  // we'll query the student_profiles table to find existing ones first
-  const { data: existingProfiles } = await supabase
+  // Existing profiles untuk gen ini
+  const { data: existingProfiles, error: existingError } = await supabase
     .from("student_profiles")
     .select("nama")
     .eq("gen", gen);
 
+  if (existingError) {
+    return { success: false, error: existingError.message };
+  }
+
   const existingNames = new Set((existingProfiles || []).map((p) => p.nama));
 
-  // For now, return a message that manual import is needed
-  // The actual import will happen from the admin UI using data from the attendance records
+  // Ambil records dari Google Sheets untuk gen ini
+  const records = await fetchRecords(gen as Gen);
+  if (records.length === 0) {
+    return { success: true, data: { imported: 0, skipped: existingNames.size } };
+  }
+
+  // Kelas terbaru per siswa (berdasarkan tanggal terakhir presensi)
+  const latestKelas = new Map<string, { kelas: string; date: string }>();
+  for (const r of records) {
+    const nama = r.nama?.toUpperCase().trim();
+    if (!nama) continue;
+    const cur = latestKelas.get(nama);
+    if (!cur || (r.tanggal || "").localeCompare(cur.date) > 0) {
+      latestKelas.set(nama, { kelas: r.kelas || "", date: r.tanggal || "" });
+    }
+  }
+
+  const toInsert: Array<{ nama: string; gen: string; kelas: string }> = [];
+  for (const [nama, { kelas }] of latestKelas) {
+    if (!kelas || existingNames.has(nama)) continue;
+    toInsert.push({ nama, gen, kelas });
+  }
+
+  if (toInsert.length === 0) {
+    return { success: true, data: { imported: 0, skipped: existingNames.size } };
+  }
+
+  const { error: insertError } = await supabase
+    .from("student_profiles")
+    .upsert(toInsert, { onConflict: "nama,gen" });
+
+  if (insertError) {
+    return { success: false, error: insertError.message };
+  }
+
   return {
     success: true,
-    data: {
-      imported: 0,
-      skipped: existingNames.size,
-    },
+    data: { imported: toInsert.length, skipped: existingNames.size },
   };
 }
 
