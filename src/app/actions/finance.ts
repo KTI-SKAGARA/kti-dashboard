@@ -413,6 +413,82 @@ export async function getFinanceSummary(
 }
 
 // ---------------------------------------------------------------------------
+// Backfill: copy existing nominalKas from Google Sheets → kas_payments
+// ---------------------------------------------------------------------------
+
+export async function backfillKasPaymentsFromRecords(): Promise<
+  ApiResponse<{ inserted: number; skipped: number }>
+> {
+  try {
+    const auth = await requireAdmin();
+    if (!auth.ok) return { success: false, error: auth.error };
+
+    const { fetchRecords } = await import("@/lib/google-sheets");
+    const { getGenConfig } = await import("@/lib/google-sheets");
+    const supabase = await createClient();
+
+    const config = await getGenConfig();
+    const activeGens = config.filter((g) => g.status === "aktif");
+
+    let inserted = 0;
+    let skipped = 0;
+
+    for (const gen of activeGens) {
+      const records = await fetchRecords(gen.gen);
+      const kasRecords = records.filter((r) => r.nominalKas > 0);
+
+      if (kasRecords.length === 0) continue;
+
+      // Check existing payments for this gen to avoid duplicates
+      const { data: existing } = await supabase
+        .from("kas_payments")
+        .select("nama, bulan_tahun, tanggal")
+        .eq("gen", gen.gen);
+
+      const existingSet = new Set(
+        (existing || []).map(
+          (r) => `${r.nama}|${r.bulan_tahun}|${r.tanggal}`
+        )
+      );
+
+      const toInsert = kasRecords
+        .filter((r) => {
+          const key = `${r.nama}|${r.bulanTahun}|${r.tanggal}`;
+          return !existingSet.has(key);
+        })
+        .map((r) => ({
+          nama: r.nama,
+          gen: gen.gen,
+          kelas: r.kelas,
+          bulan_tahun: r.bulanTahun,
+          tanggal: r.tanggal,
+          nominal: r.nominalKas,
+        }));
+
+      if (toInsert.length > 0) {
+        const { error } = await supabase.from("kas_payments").insert(toInsert);
+        if (!error) inserted += toInsert.length;
+      }
+
+      skipped += kasRecords.length - toInsert.length;
+    }
+
+    return {
+      success: true,
+      data: { inserted, skipped },
+    };
+  } catch (error) {
+    return {
+      success: false,
+      error:
+        error instanceof Error
+          ? error.message
+          : "Gagal backfill kas payments.",
+    };
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Monthly Report
 // ---------------------------------------------------------------------------
 

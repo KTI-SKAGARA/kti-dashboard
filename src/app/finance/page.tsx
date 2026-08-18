@@ -75,6 +75,7 @@ export default function FinancePage() {
   const [kasLoading, setKasLoading] = useState(true);
   const [kasFilterGen, setKasFilterGen] = useState<string>("");
   const [kasFilterBulan, setKasFilterBulan] = useState<string>("");
+  const [backfillLoading, setBackfillLoading] = useState(false);
 
   // --- Loaders ---
 
@@ -130,6 +131,23 @@ export default function FinancePage() {
     if (res.success && res.data) setKasPayments(res.data);
     setKasLoading(false);
   }, []);
+
+  const handleBackfill = useCallback(async () => {
+    setBackfillLoading(true);
+    const { backfillKasPaymentsFromRecords } = await import("@/app/actions/finance");
+    const res = await backfillKasPaymentsFromRecords();
+    if (res.success && res.data) {
+      setToast({
+        type: "success",
+        message: `Berhasil import ${res.data.inserted} data kas (${res.data.skipped} sudah ada)`,
+      });
+      loadKasPayments(kasFilterGen || undefined, kasFilterBulan || undefined);
+      if (gens.length > 0) loadSummary(gens);
+    } else {
+      setToast({ type: "error", message: res.error || "Gagal import data" });
+    }
+    setBackfillLoading(false);
+  }, [gens, kasFilterGen, kasFilterBulan, loadKasPayments, loadSummary]);
 
   useEffect(() => {
     loadGens();
@@ -337,6 +355,17 @@ export default function FinancePage() {
                 className="btn btn-outline min-h-[44px]"
               >
                 Reset
+              </button>
+              <button
+                onClick={handleBackfill}
+                disabled={backfillLoading}
+                className="btn btn-primary min-h-[44px]"
+              >
+                {backfillLoading ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  "Import dari Absensi"
+                )}
               </button>
             </div>
             <KasTable payments={kasPayments} loading={kasLoading} />
