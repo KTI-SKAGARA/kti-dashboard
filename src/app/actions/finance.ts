@@ -435,7 +435,9 @@ export async function backfillKasPaymentsFromRecords(): Promise<
 
     for (const gen of activeGens) {
       const records = await fetchRecords(gen.gen);
-      const kasRecords = records.filter((r) => r.nominalKas > 0);
+      const kasRecords = records.filter(
+        (r) => r.statusAbsen === "Hadir" && r.nominalKas > 0
+      );
 
       if (kasRecords.length === 0) continue;
 
@@ -507,11 +509,27 @@ export async function getMonthlyReport(
       .in("gen", genStrings);
 
     let income = 0;
-    let attendanceCount = 0;
     for (const r of kasRows || []) {
       income += Number(r.nominal) || 0;
-      attendanceCount++;
     }
+
+    // Presensi: hitung unique orang dari attendance records (bukan dari kas_payments)
+    const { fetchRecords } = await import("@/lib/google-sheets");
+    const { getGenConfig } = await import("@/lib/google-sheets");
+    const config = await getGenConfig();
+    const activeGens = config.filter((g) => g.status === "aktif");
+
+    const uniqueNames = new Set<string>();
+    for (const gen of activeGens) {
+      if (!gens.includes(gen.gen as Gen)) continue;
+      const records = await fetchRecords(gen.gen);
+      for (const r of records) {
+        if (r.bulanTahun === bulanTahun) {
+          uniqueNames.add(r.nama);
+        }
+      }
+    }
+    const attendanceCount = uniqueNames.size;
 
     // Expenses for this month
     const { data: expenseRows } = await supabase

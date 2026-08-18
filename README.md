@@ -61,7 +61,7 @@ npm install
 ```
 
 ### 3. Konfigurasi Lingkungan (`.env.local`)
-Buat file `.env.local` di root proyek:
+Buat file `.env.local` di root proyek (salin dari `.env.example`):
 ```env
 # Google Spreadsheet ID (dari URL Google Sheets)
 GOOGLE_SPREADSHEET_ID=your_spreadsheet_id_here
@@ -70,8 +70,10 @@ GOOGLE_SPREADSHEET_ID=your_spreadsheet_id_here
 GOOGLE_SERVICE_ACCOUNT_EMAIL=your-bot@project.iam.gserviceaccount.com
 GOOGLE_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----\n"
 
-# Password Login Admin (Default: ktiskagara2026)
-ADMIN_PASSWORD=ktiskagara2026
+# Supabase Auth (email + password, whitelist via tab profiles)
+NEXT_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
+NEXT_PUBLIC_SUPABASE_ANON_KEY=your-anon-key
+SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
 ```
 
 > **Catatan**: Kredensial Google Service Account juga dapat diletakkan pada file `service-account.json` di root direktori proyek. Jika tidak ada kredensial yang disetel, sistem otomatis berjalan dalam **Mock Mode** (in-memory) untuk kemudahan pengujian lokal.

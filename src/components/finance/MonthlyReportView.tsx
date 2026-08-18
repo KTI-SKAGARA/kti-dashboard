@@ -47,7 +47,7 @@ export default function MonthlyReportView({ report, loading }: Props) {
           <tr><td>Total Pemasukan</td><td class="text-right font-bold">${formatRupiah(report.income)}</td></tr>
           <tr><td>Total Pengeluaran</td><td class="text-right font-bold">${formatRupiah(report.expenses)}</td></tr>
           <tr><td>Saldo</td><td class="text-right font-bold">${formatRupiah(report.balance)}</td></tr>
-          <tr><td>Jumlah Presensi</td><td class="text-right">${report.attendanceCount}记录</td></tr>
+          <tr><td>Jumlah Presensi</td><td class="text-right">${report.attendanceCount} orang</td></tr>
         </table>
         ${report.expenseBreakdown.length > 0 ? `
           <h2>Breakdown Pengeluaran</h2>
