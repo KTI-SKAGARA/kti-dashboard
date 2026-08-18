@@ -52,6 +52,7 @@ export default function FinancePage() {
     totalIncome: number;
     totalExpenses: number;
     balance: number;
+    incomeByGen: { gen: string; total: number }[];
   } | null>(null);
 
   // Expenses
@@ -94,6 +95,7 @@ export default function FinancePage() {
         totalIncome: res.data.totalIncome,
         totalExpenses: res.data.totalExpenses,
         balance: res.data.balance,
+        incomeByGen: res.data.incomeByGen,
       });
     }
   }, []);
@@ -382,14 +384,13 @@ export default function FinancePage() {
                 </h3>
                 <div className="mt-3 space-y-2">
                   {gens.map((g) => {
-                    const genData = expenses.find(() => false); // placeholder
+                    const genIncome = summary.incomeByGen.find((item) => item.gen === g);
+                    const total = genIncome?.total ?? 0;
                     return (
                       <div key={g} className="flex items-center justify-between text-xs">
                         <span className="font-medium text-foreground">Gen {g}</span>
                         <span className="font-mono text-muted">
-                          {formatRupiah(
-                            summary.totalIncome / (gens.length || 1)
-                          )}
+                          {total > 0 ? formatRupiah(total) : "-"}
                         </span>
                       </div>
                     );
