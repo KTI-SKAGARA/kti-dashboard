@@ -1,4 +1,4 @@
-export const APP_NAME = "KTI OPS";
+export const APP_NAME = "KTI Dashboard";
 export const SCHOOL_NAME = "SMK Negeri 3 Jepara";
 export const ORG_NAME = "KTI SKAGARA";
 export const APP_SUBTITLE = `${ORG_NAME} — ${SCHOOL_NAME}`;
