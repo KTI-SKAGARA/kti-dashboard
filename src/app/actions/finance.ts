@@ -468,8 +468,16 @@ export async function backfillKasPaymentsFromRecords(): Promise<
         }));
 
       if (toInsert.length > 0) {
-        const { error } = await supabase.from("kas_payments").insert(toInsert);
-        if (!error) inserted += toInsert.length;
+        const BATCH_SIZE = 500;
+        for (let i = 0; i < toInsert.length; i += BATCH_SIZE) {
+          const chunk = toInsert.slice(i, i + BATCH_SIZE);
+          const { error } = await supabase.from("kas_payments").insert(chunk);
+          if (error) {
+            console.error(`Gagal insert kas gen ${gen.gen}:`, error.message);
+            return { success: false, error: `Gagal insert kas gen ${gen.gen}: ${error.message}` };
+          }
+          inserted += chunk.length;
+        }
       }
 
       skipped += kasRecords.length - toInsert.length;
@@ -499,14 +507,23 @@ export async function getMonthlyReport(
   gens: Gen[]
 ): Promise<ApiResponse<MonthlyReport>> {
   try {
-    // Income for this month from kas_payments
     const supabase = await createClient();
-    const genStrings = gens.map((g) => String(g));
+
+    // Ambil active gens dulu, income & presensi pake filtered gens yang sama
+    const { fetchRecords, getGenConfig } = await import("@/lib/google-sheets");
+    const config = await getGenConfig();
+    const activeGens = config.filter((g) => g.status === "aktif");
+    const activeGenStrings = activeGens
+      .map((g) => g.gen)
+      .filter((g) => gens.includes(g as Gen))
+      .map(String);
+
+    // Income for this month from kas_payments (hanya active gens)
     const { data: kasRows } = await supabase
       .from("kas_payments")
       .select("nominal")
       .eq("bulan_tahun", bulanTahun)
-      .in("gen", genStrings);
+      .in("gen", activeGenStrings);
 
     let income = 0;
     for (const r of kasRows || []) {
@@ -514,11 +531,6 @@ export async function getMonthlyReport(
     }
 
     // Presensi: hitung unique orang dari attendance records (bukan dari kas_payments)
-    const { fetchRecords } = await import("@/lib/google-sheets");
-    const { getGenConfig } = await import("@/lib/google-sheets");
-    const config = await getGenConfig();
-    const activeGens = config.filter((g) => g.status === "aktif");
-
     const uniqueNames = new Set<string>();
     for (const gen of activeGens) {
       if (!gens.includes(gen.gen as Gen)) continue;

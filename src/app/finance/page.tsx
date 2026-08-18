@@ -384,7 +384,7 @@ export default function FinancePage() {
                 </h3>
                 <div className="mt-3 space-y-2">
                   {gens.map((g) => {
-                    const genIncome = summary.incomeByGen.find((item) => item.gen === g);
+                    const genIncome = summary.incomeByGen?.find((item) => item.gen === g);
                     const total = genIncome?.total ?? 0;
                     return (
                       <div key={g} className="flex items-center justify-between text-xs">
