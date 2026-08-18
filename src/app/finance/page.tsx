@@ -9,10 +9,11 @@ import {
   Calendar,
   PieChart,
   BarChart3,
+  Coins,
 } from "lucide-react";
 import Link from "next/link";
 import type { Gen } from "@/types/attendance";
-import type { Expense, ExpenseCategory, Budget, MonthlyReport } from "@/types/finance";
+import type { Expense, ExpenseCategory, Budget, MonthlyReport, KasPayment } from "@/types/finance";
 import {
   getExpenseCategories,
   getExpenses,
@@ -24,6 +25,7 @@ import {
   deleteBudget,
   getFinanceSummary,
   getMonthlyReport,
+  getKasPayments,
 } from "@/app/actions/finance";
 import { getGenList } from "@/app/actions/attendance";
 import { formatRupiah, getBulanTahunFromDate, getTodayFormatted } from "@/lib/utils";
@@ -34,8 +36,9 @@ import ExpenseTable from "@/components/finance/ExpenseTable";
 import ExpenseFormModal from "@/components/finance/ExpenseFormModal";
 import BudgetView from "@/components/finance/BudgetView";
 import MonthlyReportView from "@/components/finance/MonthlyReportView";
+import KasTable from "@/components/finance/KasTable";
 
-type Tab = "ringkasan" | "pengeluaran" | "budget" | "laporan";
+type Tab = "kas" | "ringkasan" | "pengeluaran" | "budget" | "laporan";
 
 export default function FinancePage() {
   const [tab, setTab] = useState<Tab>("ringkasan");
@@ -66,6 +69,12 @@ export default function FinancePage() {
   const [reportMonth, setReportMonth] = useState(getBulanTahunFromDate(getTodayFormatted()));
   const [report, setReport] = useState<MonthlyReport | null>(null);
   const [reportLoading, setReportLoading] = useState(false);
+
+  // Kas payments
+  const [kasPayments, setKasPayments] = useState<KasPayment[]>([]);
+  const [kasLoading, setKasLoading] = useState(true);
+  const [kasFilterGen, setKasFilterGen] = useState<string>("");
+  const [kasFilterBulan, setKasFilterBulan] = useState<string>("");
 
   // --- Loaders ---
 
@@ -115,6 +124,13 @@ export default function FinancePage() {
     setReportLoading(false);
   }, []);
 
+  const loadKasPayments = useCallback(async (gen?: string, bulan?: string) => {
+    setKasLoading(true);
+    const res = await getKasPayments(gen || undefined, bulan || undefined);
+    if (res.success && res.data) setKasPayments(res.data);
+    setKasLoading(false);
+  }, []);
+
   useEffect(() => {
     loadGens();
     loadExpenses();
@@ -133,6 +149,10 @@ export default function FinancePage() {
   useEffect(() => {
     if (gens.length > 0) loadReport(reportMonth, gens);
   }, [reportMonth, gens, loadReport]);
+
+  useEffect(() => {
+    loadKasPayments(kasFilterGen || undefined, kasFilterBulan || undefined);
+  }, [kasFilterGen, kasFilterBulan, loadKasPayments]);
 
   // --- Expense CRUD ---
 
@@ -222,6 +242,7 @@ export default function FinancePage() {
   // --- Tab config ---
 
   const tabs: { key: Tab; label: string; icon: React.ReactNode }[] = [
+    { key: "kas", label: "Kas", icon: <Coins className="h-3.5 w-3.5" /> },
     { key: "ringkasan", label: "Ringkasan", icon: <PieChart className="h-3.5 w-3.5" /> },
     { key: "pengeluaran", label: "Pengeluaran", icon: <TrendingUp className="h-3.5 w-3.5" /> },
     { key: "budget", label: "Budget", icon: <BarChart3 className="h-3.5 w-3.5" /> },
@@ -280,6 +301,48 @@ export default function FinancePage() {
         )}
 
         {/* Tab content */}
+        {tab === "kas" && (
+          <div className="space-y-4">
+            <div className="flex flex-wrap items-end gap-3">
+              <div>
+                <label className="label">Filter Gen</label>
+                <select
+                  className="select min-w-[120px]"
+                  value={kasFilterGen}
+                  onChange={(e) => setKasFilterGen(e.target.value)}
+                >
+                  <option value="">Semua Gen</option>
+                  {gens.map((g) => (
+                    <option key={g} value={g}>Gen {g}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="label">Filter Bulan</label>
+                <input
+                  type="month"
+                  className="input"
+                  value={kasFilterBulan.split("-").reverse().join("-")}
+                  onChange={(e) => {
+                    const [y, m] = e.target.value.split("-");
+                    setKasFilterBulan(`${m}-${y}`);
+                  }}
+                />
+              </div>
+              <button
+                onClick={() => {
+                  setKasFilterGen("");
+                  setKasFilterBulan("");
+                }}
+                className="btn btn-outline min-h-[44px]"
+              >
+                Reset
+              </button>
+            </div>
+            <KasTable payments={kasPayments} loading={kasLoading} />
+          </div>
+        )}
+
         {tab === "ringkasan" && (
           <div className="space-y-4">
             {/* Per-gen income */}

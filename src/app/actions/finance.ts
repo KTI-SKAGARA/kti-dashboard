@@ -9,8 +9,41 @@ import type {
   Budget,
   FinanceSummary,
   MonthlyReport,
+  KasPayment,
 } from "@/types/finance";
 import { getBulanTahunFromDate, getTodayFormatted } from "@/lib/utils";
+
+// ---------------------------------------------------------------------------
+// Kas Payments (pembayaran kas siswa — pisah dari absensi)
+// ---------------------------------------------------------------------------
+
+export async function getKasPayments(gen?: string, bulanTahun?: string): Promise<ApiResponse<KasPayment[]>> {
+  const supabase = await createClient();
+  let query = supabase
+    .from("kas_payments")
+    .select("*")
+    .order("tanggal", { ascending: false });
+
+  if (gen) query = query.eq("gen", gen);
+  if (bulanTahun) query = query.eq("bulan_tahun", bulanTahun);
+
+  const { data, error } = await query;
+  if (error) return { success: false, error: error.message };
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const payments: KasPayment[] = (data || []).map((r: any) => ({
+    id: String(r.id),
+    nama: String(r.nama),
+    gen: String(r.gen),
+    kelas: String(r.kelas),
+    bulan_tahun: String(r.bulan_tahun),
+    tanggal: String(r.tanggal),
+    nominal: Number(r.nominal),
+    created_at: String(r.created_at),
+  }));
+
+  return { success: true, data: payments };
+}
 
 // ---------------------------------------------------------------------------
 // Categories
