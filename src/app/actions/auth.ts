@@ -2,6 +2,13 @@
 
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { requireAdmin as requireAdminBase } from "@/lib/supabase/auth-helpers";
+
+// Re-export with original signature for backward compatibility
+async function requireAdmin(): Promise<{ ok: boolean; error?: string }> {
+  const result = await requireAdminBase();
+  return { ok: result.ok, error: result.error };
+}
 
 // ---------------------------------------------------------------------------
 // Login: email + password via Supabase Auth
@@ -117,6 +124,9 @@ export async function listUsers(): Promise<
     created_at: string;
   }[]
 > {
+  const auth = await requireAdmin();
+  if (!auth.ok) return [];
+
   const admin = createAdminClient();
   const { data, error } = await admin
     .from("profiles")
@@ -141,6 +151,9 @@ export async function addUser(
   role: "admin" | "viewer" = "admin"
 ): Promise<{ success: boolean; error?: string }> {
   try {
+    const auth = await requireAdmin();
+    if (!auth.ok) return { success: false, error: auth.error };
+
     const admin = createAdminClient();
 
     // 1. Cek apakah email sudah ada
@@ -195,6 +208,9 @@ export async function toggleUserActive(
   isActive: boolean
 ): Promise<{ success: boolean; error?: string }> {
   try {
+    const auth = await requireAdmin();
+    if (!auth.ok) return { success: false, error: auth.error };
+
     const admin = createAdminClient();
     const { error } = await admin
       .from("profiles")
@@ -223,6 +239,9 @@ export async function changeUserRole(
   role: "admin" | "viewer"
 ): Promise<{ success: boolean; error?: string }> {
   try {
+    const auth = await requireAdmin();
+    if (!auth.ok) return { success: false, error: auth.error };
+
     const admin = createAdminClient();
     const { error } = await admin
       .from("profiles")
@@ -298,6 +317,9 @@ export async function deleteUser(
   userId: string
 ): Promise<{ success: boolean; error?: string }> {
   try {
+    const auth = await requireAdmin();
+    if (!auth.ok) return { success: false, error: auth.error };
+
     const admin = createAdminClient();
 
     // Hapus dari Supabase Auth (otomatis cascade ke profiles via FK)

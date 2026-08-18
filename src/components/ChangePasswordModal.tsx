@@ -69,7 +69,7 @@ export default function ChangePasswordModal({ onClose }: ChangePasswordModalProp
           </div>
           <button
             onClick={onClose}
-            className="btn btn-ghost min-h-[36px] min-w-[36px] p-2"
+            className="btn btn-ghost min-h-[44px] min-w-[44px] p-2"
             aria-label="Tutup"
           >
             <X className="h-4 w-4" />

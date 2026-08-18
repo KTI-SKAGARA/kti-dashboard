@@ -15,18 +15,19 @@ import {
   type Kegiatan,
   type JenisKegiatan,
   JENIS_KEGIATAN_OPTIONS,
-  STORAGE_KEY_KEGIATAN,
 } from "@/types/kegiatan";
+import {
+  getKegiatan,
+  addKegiatan,
+  updateKegiatan,
+  deleteKegiatan,
+} from "@/app/actions/kegiatan";
 
 const DAY_NAMES = ["Min", "Sen", "Sel", "Rab", "Kam", "Jum", "Sab"];
 const MONTH_NAMES = [
   "Januari", "Februari", "Maret", "April", "Mei", "Juni",
   "Juli", "Agustus", "September", "Oktober", "November", "Desember",
 ];
-
-function generateId(): string {
-  return Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
-}
 
 function parseTanggal(tgl: string): { d: number; m: number; y: number } {
   const [d, m, y] = tgl.split("/").map(Number);
@@ -47,6 +48,7 @@ function getFirstDayOfMonth(month: number, year: number): number {
 
 export default function KalenderPage() {
   const [kegiatan, setKegiatan] = useState<Kegiatan[]>([]);
+  const [loading, setLoading] = useState(true);
   const [viewMode, setViewMode] = useState<"grid" | "list">("grid");
   const [currentMonth, setCurrentMonth] = useState(new Date().getMonth() + 1);
   const [currentYear, setCurrentYear] = useState(new Date().getFullYear());
@@ -59,20 +61,17 @@ export default function KalenderPage() {
   const [formJenis, setFormJenis] = useState<JenisKegiatan>("materi");
   const [deleteId, setDeleteId] = useState<string | null>(null);
 
-  // Load from localStorage
+  const loadKegiatan = useCallback(async () => {
+    setLoading(true);
+    const data = await getKegiatan();
+    setKegiatan(data);
+    setLoading(false);
+  }, []);
+
   useEffect(() => {
-    try {
-      const raw = localStorage.getItem(STORAGE_KEY_KEGIATAN);
-      if (raw) setKegiatan(JSON.parse(raw));
-    } catch {}
-  }, []);
+    loadKegiatan();
+  }, [loadKegiatan]);
 
-  // Save to localStorage
-  const saveToStorage = useCallback((data: Kegiatan[]) => {
-    localStorage.setItem(STORAGE_KEY_KEGIATAN, JSON.stringify(data));
-  }, []);
-
-  // Kegiatan for current month
   const monthKegiatan = useMemo(() => {
     return kegiatan.filter((k) => {
       const { m, y } = parseTanggal(k.tanggal);
@@ -80,7 +79,6 @@ export default function KalenderPage() {
     });
   }, [kegiatan, currentMonth, currentYear]);
 
-  // Map tanggal -> kegiatan[]
   const kegiatanByDate = useMemo(() => {
     const map = new Map<string, Kegiatan[]>();
     for (const k of monthKegiatan) {
@@ -91,16 +89,14 @@ export default function KalenderPage() {
     return map;
   }, [monthKegiatan]);
 
-  // All kegiatan sorted by date (for list view)
   const allSorted = useMemo(() => {
     return [...kegiatan].sort((a, b) => {
       const [ad, am, ay] = a.tanggal.split("/").map(Number);
       const [bd, bm, by] = b.tanggal.split("/").map(Number);
-      return by !== ay ? by - ay : bm !== am ? bm - ad : bd - ad;
+      return by !== ay ? by - ay : bm !== am ? bm - am : bd - ad;
     });
   }, [kegiatan]);
 
-  // Calendar grid data
   const calendarDays = useMemo(() => {
     const daysInMonth = getDaysInMonth(currentMonth, currentYear);
     const firstDay = getFirstDayOfMonth(currentMonth, currentYear);
@@ -145,59 +141,48 @@ export default function KalenderPage() {
     setFormOpen(true);
   };
 
-  const handleSave = () => {
+  const handleSave = async () => {
     if (!formJudul.trim() || !formTanggal.trim()) return;
+
     if (editId) {
-      setKegiatan((prev) => {
-        const next = prev.map((k) =>
-          k.id === editId
-            ? { ...k, tanggal: formTanggal, judul: formJudul.trim(), deskripsi: formDeskripsi.trim(), jenis: formJenis }
-            : k
+      const res = await updateKegiatan(editId, formTanggal, formJudul.trim(), formDeskripsi.trim(), formJenis);
+      if (res.success) {
+        setKegiatan((prev) =>
+          prev.map((k) =>
+            k.id === editId
+              ? { ...k, tanggal: formTanggal, judul: formJudul.trim(), deskripsi: formDeskripsi.trim(), jenis: formJenis }
+              : k
+          )
         );
-        saveToStorage(next);
-        return next;
-      });
+      }
     } else {
-      const newK: Kegiatan = {
-        id: generateId(),
-        tanggal: formTanggal,
-        judul: formJudul.trim(),
-        deskripsi: formDeskripsi.trim(),
-        jenis: formJenis,
-      };
-      setKegiatan((prev) => {
-        const next = [...prev, newK];
-        saveToStorage(next);
-        return next;
-      });
+      const res = await addKegiatan(formTanggal, formJudul.trim(), formDeskripsi.trim(), formJenis);
+      if (res.success && res.data) {
+        setKegiatan((prev) => [res.data!, ...prev]);
+      }
     }
     setFormOpen(false);
   };
 
-  const handleDelete = (id: string) => {
-    setKegiatan((prev) => {
-      const next = prev.filter((k) => k.id !== id);
-      saveToStorage(next);
-      return next;
-    });
+  const handleDelete = async (id: string) => {
+    const res = await deleteKegiatan(id);
+    if (res.success) {
+      setKegiatan((prev) => prev.filter((k) => k.id !== id));
+    }
     setDeleteId(null);
   };
 
-  const getJenisStyle = (jenis: JenisKegiatan) => {
-    return JENIS_KEGIATAN_OPTIONS.find((j) => j.value === jenis)?.idle || JENIS_KEGIATAN_OPTIONS[5].idle;
-  };
+  const jenisMap = useMemo(() => {
+    const map = new Map<JenisKegiatan, (typeof JENIS_KEGIATAN_OPTIONS)[number]>();
+    for (const j of JENIS_KEGIATAN_OPTIONS) map.set(j.value, j);
+    return map;
+  }, []);
 
-  const getJenisActiveStyle = (jenis: JenisKegiatan) => {
-    return JENIS_KEGIATAN_OPTIONS.find((j) => j.value === jenis)?.active || JENIS_KEGIATAN_OPTIONS[5].active;
-  };
-
-  const getJenisDot = (jenis: JenisKegiatan) => {
-    return JENIS_KEGIATAN_OPTIONS.find((j) => j.value === jenis)?.dot || JENIS_KEGIATAN_OPTIONS[5].dot;
-  };
-
-  const getJenisLabel = (jenis: JenisKegiatan) => {
-    return JENIS_KEGIATAN_OPTIONS.find((j) => j.value === jenis)?.label || "Lainnya";
-  };
+  const fallback = JENIS_KEGIATAN_OPTIONS[5];
+  const getJenisStyle = (jenis: JenisKegiatan) => jenisMap.get(jenis)?.idle ?? fallback.idle;
+  const getJenisActiveStyle = (jenis: JenisKegiatan) => jenisMap.get(jenis)?.active ?? fallback.active;
+  const getJenisDot = (jenis: JenisKegiatan) => jenisMap.get(jenis)?.dot ?? fallback.dot;
+  const getJenisLabel = (jenis: JenisKegiatan) => jenisMap.get(jenis)?.label ?? "Lainnya";
 
   const today = new Date();
   const todayStr = toTanggal(today.getDate(), today.getMonth() + 1, today.getFullYear());
@@ -217,14 +202,14 @@ export default function KalenderPage() {
         <div className="flex items-center gap-2">
           <button
             onClick={() => setViewMode(viewMode === "grid" ? "list" : "grid")}
-            className="btn btn-secondary min-h-[40px] px-3 py-1.5 text-xs font-bold"
+            className="btn btn-secondary min-h-[44px] px-3 py-1.5 text-xs font-bold"
           >
             {viewMode === "grid" ? <List className="h-4 w-4" /> : <CalendarIcon className="h-4 w-4" />}
             {viewMode === "grid" ? "List" : "Kalender"}
           </button>
           <button
             onClick={() => openAddForm()}
-            className="btn btn-primary min-h-[40px] px-3 py-1.5 text-xs font-bold"
+            className="btn btn-primary min-h-[44px] px-3 py-1.5 text-xs font-bold"
           >
             <Plus className="h-4 w-4" />
             Tambah Kegiatan
@@ -235,7 +220,7 @@ export default function KalenderPage() {
       {/* Month Navigation */}
       <div className="card p-4">
         <div className="flex items-center justify-between">
-          <button onClick={() => navigateMonth(-1)} className="btn btn-ghost min-h-[40px] px-2 py-2">
+          <button onClick={() => navigateMonth(-1)} className="btn btn-ghost min-h-[44px] px-2 py-2">
             <ChevronLeft className="h-5 w-5" />
           </button>
           <div className="text-center">
@@ -246,177 +231,191 @@ export default function KalenderPage() {
               Kembali ke Hari Ini
             </button>
           </div>
-          <button onClick={() => navigateMonth(1)} className="btn btn-ghost min-h-[40px] px-2 py-2">
+          <button onClick={() => navigateMonth(1)} className="btn btn-ghost min-h-[44px] px-2 py-2">
             <ChevronRight className="h-5 w-5" />
           </button>
         </div>
       </div>
 
-      {/* Grid View */}
-      {viewMode === "grid" && (
-        <div className="card p-4">
-          {/* Day headers */}
-          <div className="grid grid-cols-7 gap-1 mb-1">
-            {DAY_NAMES.map((d) => (
-              <div key={d} className="py-2 text-center text-[10px] font-bold uppercase tracking-wider text-muted">
-                {d}
+      {loading ? (
+        <div className="card p-10 text-center text-xs text-muted">Memuat kegiatan...</div>
+      ) : (
+        <>
+          {/* Grid View */}
+          {viewMode === "grid" && (
+            <div className="card p-4">
+              <div className="grid grid-cols-7 gap-1 mb-1">
+                {DAY_NAMES.map((d) => (
+                  <div key={d} className="py-2 text-center text-[10px] font-bold uppercase tracking-wider text-muted">
+                    {d}
+                  </div>
+                ))}
               </div>
-            ))}
-          </div>
 
-          {/* Calendar grid */}
-          <div className="grid grid-cols-7 gap-1">
-            {calendarDays.map((day, i) => {
-              if (day === null) return <div key={`empty-${i}`} />;
-              const tanggal = toTanggal(day, currentMonth, currentYear);
-              const dayKegiatan = kegiatanByDate.get(tanggal) || [];
-              const isToday = tanggal === todayStr;
-              const isSelected = tanggal === selectedDate;
+              <div className="grid grid-cols-7 gap-1">
+                {calendarDays.map((day, i) => {
+                  if (day === null) return <div key={`empty-${i}`} />;
+                  const tanggal = toTanggal(day, currentMonth, currentYear);
+                  const dayKegiatan = kegiatanByDate.get(tanggal) || [];
+                  const isToday = tanggal === todayStr;
+                  const isSelected = tanggal === selectedDate;
 
-              return (
-                <button
-                  key={day}
-                  onClick={() => setSelectedDate(isSelected ? null : tanggal)}
-                  className={`relative min-h-[70px] rounded-lg border p-1.5 text-left transition-all sm:min-h-[80px] ${
-                    isSelected
-                      ? "border-accent bg-accent/8 ring-1 ring-accent"
-                      : isToday
-                      ? "border-accent/40 bg-accent/5"
-                      : "border-border hover:border-border-strong"
-                  }`}
-                >
-                  <span
-                    className={`inline-flex h-6 w-6 items-center justify-center rounded-full text-xs font-bold ${
-                      isToday
-                        ? "bg-accent text-on-accent"
-                        : "text-foreground"
-                    }`}
-                  >
-                    {day}
-                  </span>
-                  <div className="mt-0.5 space-y-0.5">
-                    {dayKegiatan.slice(0, 2).map((k) => (
-                      <div
-                        key={k.id}
-                        className={`flex items-center gap-1 truncate rounded px-1 py-0.5 text-[9px] font-semibold border ${getJenisStyle(k.jenis)}`}
+                  return (
+                    <button
+                      key={day}
+                      onClick={() => setSelectedDate(isSelected ? null : tanggal)}
+                      className={`relative min-h-[70px] rounded-lg border p-1.5 text-left transition-all sm:min-h-[80px] ${
+                        isSelected
+                          ? "border-accent bg-accent/8 ring-1 ring-accent"
+                          : isToday
+                          ? "border-accent/40 bg-accent/5"
+                          : "border-border hover:border-border-strong"
+                      }`}
+                    >
+                      <span
+                        className={`inline-flex h-6 w-6 items-center justify-center rounded-full text-xs font-bold ${
+                          isToday
+                            ? "bg-accent text-on-accent"
+                            : "text-foreground"
+                        }`}
                       >
-                        <span className={`inline-block h-1.5 w-1.5 shrink-0 rounded-full ${getJenisDot(k.jenis)}`} />
-                        {k.judul}
-                      </div>
-                    ))}
-                    {dayKegiatan.length > 2 && (
-                      <span className="block text-center text-[9px] font-bold text-muted">
-                        +{dayKegiatan.length - 2} lagi
+                        {day}
                       </span>
+                  <div className="mt-0.5 space-y-0.5">
+                    {dayKegiatan.length === 1 && dayKegiatan[0].jenis === "libur" ? (
+                      <span className="block text-center text-[10px] font-bold text-muted">—</span>
+                    ) : (
+                      <>
+                        {dayKegiatan.filter((k) => k.jenis !== "libur").slice(0, 2).map((k) => (
+                          <div
+                            key={k.id}
+                            className={`flex items-center gap-1 truncate rounded px-1 py-0.5 text-[9px] font-semibold border ${getJenisStyle(k.jenis)}`}
+                          >
+                            <span className={`inline-block h-1.5 w-1.5 shrink-0 rounded-full ${getJenisDot(k.jenis)}`} />
+                            {k.judul}
+                          </div>
+                        ))}
+                        {dayKegiatan.filter((k) => k.jenis !== "libur").length > 2 && (
+                          <span className="block text-center text-[9px] font-bold text-muted">
+                            +{dayKegiatan.filter((k) => k.jenis !== "libur").length - 2} lagi
+                          </span>
+                        )}
+                      </>
                     )}
                   </div>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* Selected Date Detail (grid mode) */}
+          {viewMode === "grid" && selectedDate && (
+            <div className="card p-5">
+              <div className="flex items-center justify-between border-b border-border pb-3">
+                <div>
+                  <h3 className="font-display text-sm font-bold uppercase tracking-wide text-foreground">
+                    {selectedDate}
+                  </h3>
+                  <p className="text-xs text-muted">
+                    {(kegiatanByDate.get(selectedDate) || []).filter((k) => k.jenis !== "libur").length} kegiatan
+                  </p>
+                </div>
+                <button
+                  onClick={() => openAddForm(selectedDate)}
+                  className="btn btn-secondary min-h-[44px] px-2.5 py-1 text-xs font-bold"
+                >
+                  <Plus className="h-3.5 w-3.5" />
+                  Tambah
                 </button>
-              );
-            })}
-          </div>
-        </div>
-      )}
+              </div>
+              {(kegiatanByDate.get(selectedDate) || []).filter((k) => k.jenis !== "libur").length === 0 ? (
+                <p className="py-6 text-center text-xs text-muted">
+                  {(kegiatanByDate.get(selectedDate) || []).some((k) => k.jenis === "libur")
+                    ? "Hari libur."
+                    : "Belum ada kegiatan pada tanggal ini."}
+                </p>
+              ) : (
+                <div className="mt-3 space-y-2">
+                  {(kegiatanByDate.get(selectedDate) || []).filter((k) => k.jenis !== "libur").map((k) => (
+                    <div key={k.id} className="flex items-start justify-between gap-3 rounded-lg border border-border p-3">
+                      <div className="flex-1">
+                        <div className="flex items-center gap-2">
+                          <span className={`inline-block h-2 w-2 rounded-full ${getJenisDot(k.jenis)}`} />
+                          <span className={`badge text-[10px] border ${getJenisStyle(k.jenis)}`}>
+                            {getJenisLabel(k.jenis)}
+                          </span>
+                        </div>
+                        <p className="mt-1 font-semibold text-foreground">{k.judul}</p>
+                        {k.deskripsi && <p className="mt-0.5 text-xs text-muted">{k.deskripsi}</p>}
+                      </div>
+                      <div className="flex items-center gap-1">
+                        <button onClick={() => openEditForm(k)} className="btn btn-ghost min-h-[44px] min-w-[44px] p-1.5">
+                          <Pencil className="h-3.5 w-3.5" />
+                        </button>
+                        <button onClick={() => setDeleteId(k.id)} className="btn btn-ghost min-h-[44px] min-w-[44px] p-1.5 text-danger hover:bg-danger/10">
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
 
-      {/* Selected Date Detail (grid mode) */}
-      {viewMode === "grid" && selectedDate && (
-        <div className="card p-5">
-          <div className="flex items-center justify-between border-b border-border pb-3">
-            <div>
+          {/* List View */}
+          {viewMode === "list" && (
+            <div className="card p-5">
               <h3 className="font-display text-sm font-bold uppercase tracking-wide text-foreground">
-                {selectedDate}
+                Semua Kegiatan
               </h3>
-              <p className="text-xs text-muted">
-                {(kegiatanByDate.get(selectedDate) || []).length} kegiatan
-              </p>
-            </div>
-            <button
-              onClick={() => openAddForm(selectedDate)}
-              className="btn btn-secondary min-h-[36px] px-2.5 py-1 text-xs font-bold"
-            >
-              <Plus className="h-3.5 w-3.5" />
-              Tambah
-            </button>
-          </div>
-          {(kegiatanByDate.get(selectedDate) || []).length === 0 ? (
-            <p className="py-6 text-center text-xs text-muted">Belum ada kegiatan pada tanggal ini.</p>
-          ) : (
-            <div className="mt-3 space-y-2">
-              {(kegiatanByDate.get(selectedDate) || []).map((k) => (
-                <div key={k.id} className="flex items-start justify-between gap-3 rounded-lg border border-border p-3">
-                  <div className="flex-1">
-                    <div className="flex items-center gap-2">
-                      <span className={`inline-block h-2 w-2 rounded-full ${getJenisDot(k.jenis)}`} />
-                      <span className={`badge text-[10px] border ${getJenisStyle(k.jenis)}`}>
-                        {getJenisLabel(k.jenis)}
-                      </span>
+              {allSorted.filter((k) => k.jenis !== "libur").length === 0 ? (
+                <p className="py-10 text-center text-xs text-muted">Belum ada kegiatan.</p>
+              ) : (
+                <div className="mt-3 space-y-2">
+                  {allSorted.filter((k) => k.jenis !== "libur").map((k) => (
+                    <div key={k.id} className="flex items-start gap-3 rounded-lg border border-border p-3">
+                      <div className="flex h-10 w-10 shrink-0 flex-col items-center justify-center rounded-lg border border-border bg-surface-2">
+                        <span className="text-[10px] font-bold uppercase text-muted">
+                          {MONTH_NAMES[parseTanggal(k.tanggal).m - 1].slice(0, 3)}
+                        </span>
+                        <span className="text-sm font-extrabold text-foreground leading-tight">
+                          {parseTanggal(k.tanggal).d}
+                        </span>
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2">
+                          <span className={`inline-block h-2 w-2 rounded-full ${getJenisDot(k.jenis)}`} />
+                          <span className={`badge text-[10px] border ${getJenisStyle(k.jenis)}`}>
+                            {getJenisLabel(k.jenis)}
+                          </span>
+                        </div>
+                        <p className="mt-1 font-semibold text-foreground">{k.judul}</p>
+                        {k.deskripsi && <p className="mt-0.5 text-xs text-muted truncate">{k.deskripsi}</p>}
+                      </div>
+                      <div className="flex items-center gap-1">
+                        <button onClick={() => openEditForm(k)} className="btn btn-ghost min-h-[44px] min-w-[44px] p-1.5">
+                          <Pencil className="h-3.5 w-3.5" />
+                        </button>
+                        <button onClick={() => setDeleteId(k.id)} className="btn btn-ghost min-h-[44px] min-w-[44px] p-1.5 text-danger hover:bg-danger/10">
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
                     </div>
-                    <p className="mt-1 font-semibold text-foreground">{k.judul}</p>
-                    {k.deskripsi && <p className="mt-0.5 text-xs text-muted">{k.deskripsi}</p>}
-                  </div>
-                  <div className="flex items-center gap-1">
-                    <button onClick={() => openEditForm(k)} className="btn btn-ghost min-h-[36px] min-w-[36px] p-1.5">
-                      <Pencil className="h-3.5 w-3.5" />
-                    </button>
-                    <button onClick={() => setDeleteId(k.id)} className="btn btn-ghost min-h-[36px] min-w-[36px] p-1.5 text-danger hover:bg-danger/10">
-                      <Trash2 className="h-3.5 w-3.5" />
-                    </button>
-                  </div>
+                  ))}
                 </div>
-              ))}
+              )}
             </div>
           )}
-        </div>
-      )}
-
-      {/* List View */}
-      {viewMode === "list" && (
-        <div className="card p-5">
-          <h3 className="font-display text-sm font-bold uppercase tracking-wide text-foreground">
-            Semua Kegiatan
-          </h3>
-          {allSorted.length === 0 ? (
-            <p className="py-10 text-center text-xs text-muted">Belum ada kegiatan.</p>
-          ) : (
-            <div className="mt-3 space-y-2">
-              {allSorted.map((k) => (
-                <div key={k.id} className="flex items-start gap-3 rounded-lg border border-border p-3">
-                  <div className="flex h-10 w-10 shrink-0 flex-col items-center justify-center rounded-lg border border-border bg-surface-2">
-                    <span className="text-[10px] font-bold uppercase text-muted">
-                      {MONTH_NAMES[parseTanggal(k.tanggal).m - 1].slice(0, 3)}
-                    </span>
-                    <span className="text-sm font-extrabold text-foreground leading-tight">
-                      {parseTanggal(k.tanggal).d}
-                    </span>
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2">
-                      <span className={`inline-block h-2 w-2 rounded-full ${getJenisDot(k.jenis)}`} />
-                      <span className={`badge text-[10px] border ${getJenisStyle(k.jenis)}`}>
-                        {getJenisLabel(k.jenis)}
-                      </span>
-                    </div>
-                    <p className="mt-1 font-semibold text-foreground">{k.judul}</p>
-                    {k.deskripsi && <p className="mt-0.5 text-xs text-muted truncate">{k.deskripsi}</p>}
-                  </div>
-                  <div className="flex items-center gap-1">
-                    <button onClick={() => openEditForm(k)} className="btn btn-ghost min-h-[36px] min-w-[36px] p-1.5">
-                      <Pencil className="h-3.5 w-3.5" />
-                    </button>
-                    <button onClick={() => setDeleteId(k.id)} className="btn btn-ghost min-h-[36px] min-w-[36px] p-1.5 text-danger hover:bg-danger/10">
-                      <Trash2 className="h-3.5 w-3.5" />
-                    </button>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
+        </>
       )}
 
       {/* Legend */}
       <div className="flex flex-wrap items-center gap-3">
         <span className="text-[10px] font-bold uppercase tracking-wider text-muted">Keterangan:</span>
-        {JENIS_KEGIATAN_OPTIONS.map((j) => (
+        {JENIS_KEGIATAN_OPTIONS.filter((j) => j.value !== "libur").map((j) => (
           <span key={j.value} className="flex items-center gap-1.5 text-xs font-semibold text-foreground">
             <span className={`inline-block h-2.5 w-2.5 rounded-full ${j.dot}`} />
             {j.label}
@@ -496,10 +495,10 @@ export default function KalenderPage() {
             </div>
 
             <div className="mt-5 flex items-center justify-end gap-2">
-              <button onClick={() => setFormOpen(false)} className="btn btn-secondary min-h-[40px] px-3 py-1.5 text-xs font-bold">
+              <button onClick={() => setFormOpen(false)} className="btn btn-secondary min-h-[44px] px-3 py-1.5 text-xs font-bold">
                 Batal
               </button>
-              <button onClick={handleSave} className="btn btn-primary min-h-[40px] px-3 py-1.5 text-xs font-bold">
+              <button onClick={handleSave} className="btn btn-primary min-h-[44px] px-3 py-1.5 text-xs font-bold">
                 {editId ? "Simpan" : "Tambah"}
               </button>
             </div>
@@ -516,10 +515,10 @@ export default function KalenderPage() {
             </h3>
             <p className="mt-1 text-xs text-muted">Tindakan ini tidak dapat dibatalkan.</p>
             <div className="mt-5 flex items-center justify-end gap-2">
-              <button onClick={() => setDeleteId(null)} className="btn btn-secondary min-h-[40px] px-3 py-1.5 text-xs font-bold">
+              <button onClick={() => setDeleteId(null)} className="btn btn-secondary min-h-[44px] px-3 py-1.5 text-xs font-bold">
                 Batal
               </button>
-              <button onClick={() => handleDelete(deleteId)} className="btn btn-danger min-h-[40px] px-3 py-1.5 text-xs font-bold">
+              <button onClick={() => handleDelete(deleteId)} className="btn btn-danger min-h-[44px] px-3 py-1.5 text-xs font-bold">
                 Hapus
               </button>
             </div>

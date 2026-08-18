@@ -7,7 +7,7 @@ import {
   getGenTabName,
   CONFIG_TAB,
 } from "@/types/attendance";
-import { normalizeName, getBulanTahunFromDate } from "@/lib/utils";
+import { normalizeName, getBulanTahunFromDate, tanggalToNumber } from "@/lib/utils";
 import fs from "fs";
 import path from "path";
 import type { GoogleSpreadsheet, GoogleSpreadsheetRow, GoogleSpreadsheetWorksheet } from "google-spreadsheet";
@@ -76,27 +76,33 @@ function getFormattedPrivateKey(): string {
   return key.replace(/\\n/g, "\n");
 }
 
+let _cachedCredentials: { email: string; key: string } | null = null;
+
 function getServiceAccountCredentials(): { email: string; key: string } {
+  if (_cachedCredentials) return _cachedCredentials;
+
   const jsonPath = path.join(process.cwd(), "service-account.json");
   if (fs.existsSync(jsonPath)) {
     try {
       const fileContent = fs.readFileSync(jsonPath, "utf-8");
       const parsed = JSON.parse(fileContent);
       if (parsed.client_email && parsed.private_key) {
-        return {
+        _cachedCredentials = {
           email: parsed.client_email,
           key: parsed.private_key.replace(/\\n/g, "\n"),
         };
+        return _cachedCredentials;
       }
     } catch (e) {
       console.warn("Error reading service-account.json:", e);
     }
   }
 
-  return {
+  _cachedCredentials = {
     email: process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL || "",
     key: getFormattedPrivateKey(),
   };
+  return _cachedCredentials;
 }
 
 export function isGoogleSheetsConfigured(): boolean {
@@ -339,6 +345,41 @@ export async function markGenLulus(gen: Gen, lulus: boolean): Promise<void> {
 }
 
 // ---------------------------------------------------------------------------
+// Admin: delete gen (hapus dari CONFIG + hapus tab sheet)
+// ---------------------------------------------------------------------------
+
+export async function deleteGen(gen: Gen): Promise<void> {
+  if (!isGoogleSheetsConfigured()) {
+    // Mock mode: hapus dari mock config
+    const idx = MOCK_GEN_CONFIG.findIndex((c) => c.gen === gen);
+    if (idx >= 0) MOCK_GEN_CONFIG.splice(idx, 1);
+    delete mockAppended[gen];
+    return;
+  }
+
+  const doc = await getDoc(true);
+
+  // 1. Hapus entry dari CONFIG tab
+  const configSheet = doc.sheetsByTitle[CONFIG_TAB];
+  if (configSheet) {
+    const rows: GoogleSpreadsheetRow[] = await configSheet.getRows();
+    const existing = rows.find((r: GoogleSpreadsheetRow) => r.get("Gen") === gen);
+    if (existing) {
+      await existing.delete();
+    }
+  }
+
+  // 2. Hapus tab sheet gen (jika ada)
+  const tabName = getGenTabName(gen);
+  const genSheet = doc.sheetsByTitle[tabName];
+  if (genSheet) {
+    await doc.deleteSheet(genSheet.sheetId);
+  }
+
+  invalidateCache();
+}
+
+// ---------------------------------------------------------------------------
 // Records CRUD with TTL Caching
 // ---------------------------------------------------------------------------
 
@@ -400,7 +441,9 @@ export async function fetchRecords(
 export interface RecordsQuery {
   kelas?: string;
   bulan?: string; // MM-YYYY
-  tanggal?: string; // DD/MM/YYYY
+  tanggal?: string; // DD/MM/YYYY (single date, legacy)
+  tanggalFrom?: string; // DD/MM/YYYY (inclusive)
+  tanggalTo?: string; // DD/MM/YYYY (inclusive)
   status?: StatusAbsen;
   search?: string; // substring nama (case-insensitive)
 }
@@ -429,6 +472,14 @@ export async function queryRecords(
   if (query.kelas) result = result.filter((r) => r.kelas === query.kelas);
   if (query.bulan) result = result.filter((r) => r.bulanTahun === query.bulan);
   if (query.tanggal) result = result.filter((r) => r.tanggal === query.tanggal);
+  if (query.tanggalFrom || query.tanggalTo) {
+    const fromNum = query.tanggalFrom ? tanggalToNumber(query.tanggalFrom) : -Infinity;
+    const toNum = query.tanggalTo ? tanggalToNumber(query.tanggalTo) : Infinity;
+    result = result.filter((r) => {
+      const t = tanggalToNumber(r.tanggal);
+      return !Number.isNaN(t) && t >= fromNum && t <= toNum;
+    });
+  }
   if (query.status) result = result.filter((r) => r.statusAbsen === query.status);
   if (query.search) {
     const q = query.search.toLowerCase();

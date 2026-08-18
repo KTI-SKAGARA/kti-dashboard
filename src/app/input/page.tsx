@@ -10,6 +10,11 @@ import {
   KAS_RUTIN_DEFAULT,
 } from "@/types/attendance";
 import {
+  type Kegiatan,
+  getLiburDates,
+} from "@/types/kegiatan";
+import { getKegiatan } from "@/app/actions/kegiatan";
+import {
   submitAttendanceRecord,
   submitBulkAttendance,
   getExistingStudents,
@@ -23,6 +28,7 @@ import {
   formatRupiah,
   formatTanggalIndo,
   getGenCardSelectedStyle,
+  getStatusBadgeClass,
 } from "@/lib/utils";
 import { APP_NAME, SCHOOL_NAME, TOAST_DURATION } from "@/lib/constants";
 import {
@@ -34,6 +40,7 @@ import {
   User,
   ListChecks,
   PenLine,
+  GripVertical,
 } from "lucide-react";
 import Link from "next/link";
 import Toast from "@/components/Toast";
@@ -43,9 +50,36 @@ type InputMode = "normal" | "cepat";
 interface QuickStudent {
   nama: string;
   kelas: string;
-  checked: boolean;
+  status: StatusAbsen | null;
   nominalKas: number;
 }
+
+// Palet warna status (konsisten dengan mode manual & tabel)
+const STATUS_STYLES: Record<
+  StatusAbsen,
+  { chip: string; row: string; badge: string }
+> = {
+  Hadir: {
+    chip: "border-emerald-500 bg-emerald-500/15 text-emerald-700 dark:text-emerald-300",
+    row: "border-emerald-500/50 bg-emerald-500/10 text-foreground",
+    badge: getStatusBadgeClass("Hadir"),
+  },
+  Sakit: {
+    chip: "border-amber-500 bg-amber-500/15 text-amber-700 dark:text-amber-300",
+    row: "border-amber-500/50 bg-amber-500/10 text-foreground",
+    badge: getStatusBadgeClass("Sakit"),
+  },
+  Izin: {
+    chip: "border-accent bg-accent/15 text-accent",
+    row: "border-accent/50 bg-accent/10 text-foreground",
+    badge: getStatusBadgeClass("Izin"),
+  },
+  Alfa: {
+    chip: "border-danger bg-danger/15 text-danger",
+    row: "border-danger/50 bg-danger/10 text-foreground",
+    badge: getStatusBadgeClass("Alfa"),
+  },
+};
 
 export default function InputPage() {
   const [mode, setMode] = useState<InputMode>("normal");
@@ -70,10 +104,19 @@ export default function InputPage() {
     message: string;
   } | null>(null);
   const [errors, setErrors] = useState<Record<string, string>>({});
+  const [kegiatanList, setKegiatanList] = useState<Kegiatan[]>([]);
+
+  const liburDates = useMemo(() => getLiburDates(kegiatanList), [kegiatanList]);
+  const isLibur = useMemo(() => {
+    if (!tanggal) return false;
+    return liburDates.has(parseISOTanggal(tanggal));
+  }, [tanggal, liburDates]);
 
   // Quick mode state
-  const [checkedMap, setCheckedMap] = useState<Record<string, boolean>>({});
+  const [statusMap, setStatusMap] = useState<Record<string, StatusAbsen>>({});
   const [kasMap, setKasMap] = useState<Record<string, number>>({});
+  const [pickedStatus, setPickedStatus] = useState<StatusAbsen | null>(null);
+  const [dragOverNama, setDragOverNama] = useState<string | null>(null);
 
   // Active gens only (for dropdown & buttons)
   const activeGens = useMemo(
@@ -98,6 +141,11 @@ export default function InputPage() {
   useEffect(() => {
     loadGenList(); // eslint-disable-line react-hooks/set-state-in-effect
   }, [loadGenList]);
+
+  // Load kegiatan for libur check
+  useEffect(() => {
+    getKegiatan().then(setKegiatanList);
+  }, []);
 
   // All classes: 39 official + whatever is in the sheet
   const availableClasses = useMemo(() => {
@@ -147,10 +195,10 @@ export default function InputPage() {
     return studentsForKelas.map((s) => ({
       nama: s.nama,
       kelas: s.kelas,
-      checked: checkedMap[s.nama] ?? false,
+      status: statusMap[s.nama] ?? null,
       nominalKas: kasMap[s.nama] ?? KAS_RUTIN_DEFAULT,
     }));
-  }, [mode, kelas, studentsForKelas, checkedMap, kasMap]);
+  }, [mode, kelas, studentsForKelas, statusMap, kasMap]);
 
   // Kas rules (normal mode)
   const kasRules = useMemo(() => {
@@ -166,12 +214,20 @@ export default function InputPage() {
 
   // Quick mode stats
   const quickStats = useMemo(() => {
-    const total = quickStudents.length;
-    const hadir = quickStudents.filter((s) => s.checked).length;
-    const totalKas = quickStudents
-      .filter((s) => s.checked)
-      .reduce((sum, s) => sum + s.nominalKas, 0);
-    return { total, hadir, totalKas };
+    const counts = { hadir: 0, sakit: 0, izin: 0, alfa: 0, terisi: 0 };
+    let totalKas = 0;
+    for (const s of quickStudents) {
+      if (s.status) {
+        counts[s.status.toLowerCase() as keyof typeof counts] += 1;
+        counts.terisi += 1;
+        if (s.status === "Hadir") totalKas += s.nominalKas;
+      }
+    }
+    return {
+      total: quickStudents.length,
+      ...counts,
+      totalKas,
+    };
   }, [quickStudents]);
 
   // Autocomplete suggestions for normal mode
@@ -220,16 +276,41 @@ export default function InputPage() {
   const handleKelasChange = (newKelas: string) => {
     setKelas(newKelas);
     if (errors.kelas) setErrors((prev) => ({ ...prev, kelas: "" }));
-    setCheckedMap({});
+    setStatusMap({});
     setKasMap({});
+    setPickedStatus(null);
   };
 
   // Quick mode handlers
-  const toggleStudentCheck = (studentNama: string) => {
-    setCheckedMap((prev) => ({
-      ...prev,
-      [studentNama]: !prev[studentNama],
-    }));
+  const applyStatus = (studentNama: string, st: StatusAbsen) => {
+    setStatusMap((prev) => ({ ...prev, [studentNama]: st }));
+    if (st !== "Hadir") {
+      setKasMap((prev) => ({ ...prev, [studentNama]: 0 }));
+    }
+  };
+
+  const clearStudentStatus = (studentNama: string) => {
+    setStatusMap((prev) => {
+      const next = { ...prev };
+      delete next[studentNama];
+      return next;
+    });
+    setKasMap((prev) => {
+      const next = { ...prev };
+      delete next[studentNama];
+      return next;
+    });
+  };
+
+  // Tap row: status ter-pick diterapkan; tanpa pick = toggle Hadir
+  const handleRowTap = (studentNama: string) => {
+    if (pickedStatus) {
+      applyStatus(studentNama, pickedStatus);
+    } else if (statusMap[studentNama]) {
+      clearStudentStatus(studentNama);
+    } else {
+      applyStatus(studentNama, "Hadir");
+    }
   };
 
   const setStudentKas = (studentNama: string, amount: number) => {
@@ -239,12 +320,35 @@ export default function InputPage() {
     }));
   };
 
-  const toggleAllStudents = (checked: boolean) => {
-    const next: Record<string, boolean> = {};
-    for (const s of studentsForKelas) {
-      next[s.nama] = checked;
+  const toggleAllStudents = (st: StatusAbsen | null) => {
+    if (st) {
+      const next: Record<string, StatusAbsen> = {};
+      for (const s of studentsForKelas) next[s.nama] = st;
+      setStatusMap(next);
+      if (st !== "Hadir") {
+        const kas: Record<string, number> = {};
+        for (const s of studentsForKelas) kas[s.nama] = 0;
+        setKasMap(kas);
+      }
+    } else {
+      setStatusMap({});
+      setKasMap({});
     }
-    setCheckedMap(next);
+  };
+
+  // Drag & drop: chip status di-drag ke baris siswa (desktop)
+  const handleStatusDragStart = (e: React.DragEvent, st: StatusAbsen) => {
+    e.dataTransfer.setData("text/plain", st);
+    e.dataTransfer.effectAllowed = "copy";
+    setPickedStatus(st);
+  };
+
+  const handleRowDrop = (e: React.DragEvent, studentNama: string) => {
+    e.preventDefault();
+    const st = (e.dataTransfer.getData("text/plain") ||
+      pickedStatus) as StatusAbsen;
+    if (st) applyStatus(studentNama, st);
+    setDragOverNama(null);
   };
 
   // Validation & Submit for normal mode
@@ -307,11 +411,11 @@ export default function InputPage() {
       return;
     }
 
-    const hadir = quickStudents.filter((s) => s.checked);
-    if (hadir.length === 0) {
+    const marked = quickStudents.filter((s) => s.status);
+    if (marked.length === 0) {
       setToast({
         type: "error",
-        message: "Pilih minimal 1 siswa yang hadir.",
+        message: "Pilih minimal 1 siswa (beri status kehadiran).",
       });
       setTimeout(() => setToast(null), TOAST_DURATION);
       return;
@@ -322,23 +426,24 @@ export default function InputPage() {
       gen,
       kelas,
       parseISOTanggal(tanggal),
-      hadir.map((s) => ({
+      marked.map((s) => ({
         nama: s.nama,
-        statusAbsen: "Hadir" as StatusAbsen,
-        nominalKas: s.nominalKas,
+        statusAbsen: s.status as StatusAbsen,
+        nominalKas: s.status === "Hadir" ? s.nominalKas : 0,
       }))
     );
 
     setSubmitting(false);
 
     if (res.success) {
-      const count = res.data?.saved ?? hadir.length;
+      const count = res.data?.saved ?? marked.length;
       setToast({
         type: "success",
         message: `${count} data absensi berhasil disimpan ke Gen ${gen}!`,
       });
-      setCheckedMap({});
+      setStatusMap({});
       setKasMap({});
+      setPickedStatus(null);
       loadGenData(gen);
     } else {
       setToast({
@@ -358,8 +463,9 @@ export default function InputPage() {
     setStatusAbsen("Hadir");
     setBayarKas(true);
     setNominalKas(`${KAS_RUTIN_DEFAULT}`);
-    setCheckedMap({});
+    setStatusMap({});
     setKasMap({});
+    setPickedStatus(null);
     setErrors({});
     setToast(null);
   };
@@ -368,8 +474,9 @@ export default function InputPage() {
     setGen(newGen);
     setKelas("");
     setNama("");
-    setCheckedMap({});
+    setStatusMap({});
     setKasMap({});
+    setPickedStatus(null);
   };
 
   return (
@@ -550,6 +657,12 @@ export default function InputPage() {
                 {errors.tanggal}
               </p>
             )}
+            {isLibur && !errors.tanggal && (
+              <p className="mt-1.5 flex items-center gap-1 text-xs font-semibold text-amber-600 dark:text-amber-400">
+                <AlertCircle className="h-3 w-3" />
+                Tanggal ini adalah hari libur. Data yang diinput tidak akan dihitung dalam kalkulasi absensi.
+              </p>
+            )}
           </div>
         </div>
 
@@ -561,14 +674,14 @@ export default function InputPage() {
               <label htmlFor="input-nama" className="label">
                 Nama Siswa <span className="text-danger">*</span>
               </label>
-              <div className="relative">
-                <User className="absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted" />
+              <div className="flex items-center gap-2 rounded-[0.375rem] border border-border bg-surface px-3 py-2 transition-colors focus-within:border-accent focus-within:shadow-[0_0_0_3px_color-mix(in_srgb,var(--color-accent)_12%,transparent)]">
+                <User className="h-4 w-4 shrink-0 text-muted" />
                 <input
                   id="input-nama"
                   type="text"
                   placeholder="Ketik nama siswa..."
-                  className={`input pl-10 uppercase ${
-                    errors.nama ? "!border-danger focus:!ring-danger/20" : ""
+                  className={`flex-1 min-w-0 bg-transparent text-sm text-foreground outline-none placeholder:text-muted uppercase ${
+                    errors.nama ? "text-danger" : ""
                   }`}
                   value={nama}
                   onChange={(e) => {
@@ -750,26 +863,68 @@ export default function InputPage() {
                       Daftar Siswa {kelas} (Gen {gen})
                     </p>
                     <p className="text-xs text-muted">
-                      {quickStats.hadir} dari {quickStats.total} siswa hadir • Total Kas:{" "}
-                      <strong className="text-accent">{formatRupiah(quickStats.totalKas)}</strong>
+                      {quickStats.terisi} dari {quickStats.total} siswa diisi •{" "}
+                      <span className="text-emerald-600 dark:text-emerald-300 font-bold">{quickStats.hadir} Hadir</span> •{" "}
+                      <span className="text-amber-600 dark:text-amber-300 font-bold">{quickStats.sakit} Sakit</span> •{" "}
+                      <span className="text-accent font-bold">{quickStats.izin} Izin</span> •{" "}
+                      <span className="text-danger font-bold">{quickStats.alfa} Alfa</span> •{" "}
+                      Kas: <strong className="text-accent">{formatRupiah(quickStats.totalKas)}</strong>
                     </p>
                   </div>
                   <div className="flex items-center gap-2">
                     <button
                       type="button"
-                      onClick={() => toggleAllStudents(true)}
-                      className="btn btn-secondary min-h-[36px] px-3 py-1.5 text-xs font-bold"
+                      onClick={() => toggleAllStudents("Hadir")}
+                      className="btn btn-secondary min-h-[44px] px-3 py-1.5 text-xs font-bold"
                     >
                       Hadir Semua
                     </button>
                     <button
                       type="button"
-                      onClick={() => toggleAllStudents(false)}
-                      className="btn btn-ghost min-h-[36px] px-3 py-1.5 text-xs font-bold"
+                      onClick={() => toggleAllStudents(null)}
+                      className="btn btn-ghost min-h-[44px] px-3 py-1.5 text-xs font-bold"
                     >
                       Kosongkan
                     </button>
                   </div>
+                </div>
+
+                {/* Status palette: drag (desktop) / ketuk lalu ketuk siswa (HP) */}
+                <div className="rounded-xl border-2 border-border bg-surface p-3">
+                  <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                    {(["Hadir", "Sakit", "Izin", "Alfa"] as StatusAbsen[]).map((st) => {
+                      const isPicked = pickedStatus === st;
+                      return (
+                        <button
+                          key={st}
+                          type="button"
+                          draggable
+                          onDragStart={(e) => handleStatusDragStart(e, st)}
+                          onClick={() =>
+                            setPickedStatus((prev) => (prev === st ? null : st))
+                          }
+                          className={`flex min-h-[44px] items-center justify-center gap-1.5 rounded-xl border-2 font-display text-sm font-extrabold uppercase tracking-wide transition-all cursor-grab active:cursor-grabbing ${
+                            isPicked
+                              ? `${STATUS_STYLES[st].chip} ring-2 ring-offset-2 ring-offset-surface`
+                              : `${STATUS_STYLES[st].chip} opacity-80 hover:opacity-100`
+                          }`}
+                        >
+                          <GripVertical className="h-3.5 w-3.5" />
+                          {st}
+                          {isPicked && (
+                            <span className="ml-0.5 text-[9px] font-bold normal-case tracking-normal">
+                              dipilih
+                            </span>
+                          )}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <p className="mt-2 text-center text-[10px] font-semibold uppercase tracking-wider text-muted">
+                    {pickedStatus
+                      ? `Ketuk siswa untuk menandai ${pickedStatus}`
+                      : "Drag / ketuk status, lalu ketuk nama siswa untuk menandai"}
+                  </p>
                 </div>
 
                 {/* Quick students checklist */}
@@ -777,26 +932,35 @@ export default function InputPage() {
                   {quickStudents.map((s) => (
                     <div
                       key={s.nama}
-                      onClick={() => toggleStudentCheck(s.nama)}
+                      onClick={() => handleRowTap(s.nama)}
+                      onDragOver={(e) => {
+                        e.preventDefault();
+                        setDragOverNama(s.nama);
+                      }}
+                      onDragLeave={() => setDragOverNama((prev) => (prev === s.nama ? null : prev))}
+                      onDrop={(e) => handleRowDrop(e, s.nama)}
                       className={`flex cursor-pointer items-center justify-between rounded-xl border-2 p-3 transition-all ${
-                        s.checked
-                          ? "border-emerald-500/50 bg-emerald-500/10 text-foreground"
+                        s.status
+                          ? STATUS_STYLES[s.status].row
                           : "border-border bg-surface hover:bg-surface-2 text-muted"
-                      }`}
+                      } ${dragOverNama === s.nama ? "ring-2 ring-accent" : ""}`}
                     >
-                      <div className="flex items-center gap-3">
-                        <input
-                          type="checkbox"
-                          checked={s.checked}
-                          onChange={() => {}} // handled by parent div
-                          className="h-4 w-4 rounded accent-emerald-600"
-                        />
-                        <span className="font-semibold text-sm uppercase text-foreground">
+                      <div className="flex min-w-0 items-center gap-2.5">
+                        <span className="font-semibold text-sm uppercase text-foreground truncate">
                           {s.nama}
                         </span>
+                        {s.status ? (
+                          <span className={`badge shrink-0 font-bold ${STATUS_STYLES[s.status].badge}`}>
+                            {s.status}
+                          </span>
+                        ) : (
+                          <span className="shrink-0 text-[10px] font-bold uppercase text-muted">
+                            belum diisi
+                          </span>
+                        )}
                       </div>
 
-                      {s.checked && (
+                      {s.status === "Hadir" && (
                         <div
                           className="flex items-center gap-1.5"
                           onClick={(e) => e.stopPropagation()}
@@ -824,7 +988,7 @@ export default function InputPage() {
                     Target Konfirmasi Mode Cepat:
                   </p>
                   <p className="mt-1 font-bold text-foreground">
-                    Menyimpan <strong className="text-accent">{quickStats.hadir} siswa</strong> ke <strong>GEN {gen}</strong> • Kelas <strong>{kelas}</strong> • Tanggal <strong>{formatTanggalIndo(parseISOTanggal(tanggal))}</strong>
+                    Menyimpan <strong className="text-accent">{quickStats.terisi} siswa</strong> ke <strong>GEN {gen}</strong> • Kelas <strong>{kelas}</strong> • Tanggal <strong>{formatTanggalIndo(parseISOTanggal(tanggal))}</strong>
                   </p>
                 </div>
 
@@ -841,7 +1005,7 @@ export default function InputPage() {
                   <button
                     type="button"
                     onClick={handleQuickSubmit}
-                    disabled={submitting || quickStats.hadir === 0}
+                    disabled={submitting || quickStats.terisi === 0}
                     className="btn btn-primary min-h-[44px] px-6 py-2 text-sm font-bold"
                   >
                     {submitting ? (
@@ -851,7 +1015,7 @@ export default function InputPage() {
                     )}
                     {submitting
                       ? "Menyimpan..."
-                      : `Simpan ${quickStats.hadir} Siswa Hadir`}
+                      : `Simpan ${quickStats.terisi} Siswa`}
                   </button>
                 </div>
               </>

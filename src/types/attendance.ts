@@ -1,5 +1,20 @@
 // TypeScript types for KTI SKAGARA Attendance & Cash Management
 
+// ---- Auth Roles ----
+
+export type Role = "owner" | "admin" | "viewer";
+
+// ---- Student Profile ----
+
+export interface StudentProfile {
+  id: string;
+  nama: string;
+  gen: string;
+  kelas: string;
+  created_at: string;
+  updated_at: string;
+}
+
 // ---- Gen (generation = intake batch) ----
 
 export type Gen = string; // e.g. "10", "11", "12", "13", ...
@@ -109,7 +124,8 @@ export interface FilterState {
   gen: FilterGen;
   kelas: string; // "" means all
   bulan: string; // "" means all (format: MM-YYYY)
-  tanggal: string; // "" means all (format: DD/MM/YYYY)
+  tanggalFrom: string; // "" means all (format ISO YYYY-MM-DD)
+  tanggalTo: string; // "" means all (format ISO YYYY-MM-DD)
   status: StatusAbsen | ""; // "" means all
   search: string;
 }

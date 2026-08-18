@@ -135,7 +135,7 @@ export default function AttendanceTrendChart({
         <div className="flex items-center gap-2 border-b border-border pb-3">
           <span className="text-xs font-bold text-muted">Bulan:</span>
           <select
-            className="select min-h-[38px] py-1 text-xs font-bold"
+            className="select min-h-[44px] py-1 text-xs font-bold"
             value={activeMonth}
             onChange={(e) => setSelectedMonth(e.target.value)}
           >

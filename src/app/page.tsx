@@ -9,7 +9,6 @@ import {
   type GenConfig,
   type StatusAbsen,
   type TaggedRecord,
-  SKAGARA_CLASSES,
 } from "@/types/attendance";
 import {
   deleteAttendanceRecord,
@@ -19,38 +18,43 @@ import {
   getGenList,
   getAttendanceRecordsPage,
 } from "@/app/actions/attendance";
+import {
+  type Kegiatan,
+  getLiburDates,
+} from "@/types/kegiatan";
+import { getKegiatan } from "@/app/actions/kegiatan";
 import { useTaggedRecords, useAttendanceData } from "@/hooks/useAttendanceData";
 import {
-  formatRupiah,
   formatBulanTahun,
   formatTanggalToISO,
   getTodayFormatted,
   getTodayISO,
   parseISOTanggal,
+  tanggalToNumber,
   getGenBadgeColor,
-  getGenCardSelectedStyle,
 } from "@/lib/utils";
 import { APP_NAME, PAGE_SIZE, TOAST_DURATION } from "@/lib/constants";
 import {
   PieChart as PieChartIcon,
   Table as TableIcon,
-  Calendar,
   PlusCircle,
-  Trash2,
-  Loader2,
-  ArrowRightLeft,
 } from "lucide-react";
 import Link from "next/link";
-import * as XLSX from "xlsx";
 import DeleteConfirmModal from "@/components/DeleteConfirmModal";
 import StudentDetailModal from "@/components/StudentDetailModal";
 import Toast from "@/components/Toast";
 import FilterBar from "@/components/dashboard/FilterBar";
 import AttendanceTable from "@/components/dashboard/AttendanceTable";
 import StatsView from "@/components/dashboard/StatsView";
+import IndividualStatsInline from "@/components/dashboard/IndividualStatsInline";
+import TodayBanner from "@/components/dashboard/TodayBanner";
+import BulkDeleteModal from "@/components/dashboard/BulkDeleteModal";
+import BulkMoveModal from "@/components/dashboard/BulkMoveModal";
+import EditRecordModal from "@/components/dashboard/EditRecordModal";
 
 export default function DashboardPage() {
-  const [viewMode, setViewMode] = useState<"table" | "stats">("table");
+  const [viewMode, setViewMode] = useState<"absensi" | "rekap">("absensi");
+  const [rekapSubTab, setRekapSubTab] = useState<"ringkasan" | "siswa">("ringkasan");
 
   const [genList, setGenList] = useState<GenConfig[]>([]);
 
@@ -58,7 +62,8 @@ export default function DashboardPage() {
     gen: "semua",
     kelas: "",
     bulan: "",
-    tanggal: "",
+    tanggalFrom: "",
+    tanggalTo: "",
     status: "",
     search: "",
   });
@@ -110,11 +115,16 @@ export default function DashboardPage() {
     message: string;
   } | null>(null);
 
-  // Only active gens
-  const iterGens = useMemo(() => {
-    return genList.filter((g) => g.status === "aktif").map((g) => g.gen);
-  }, [genList]);
+  const [kegiatanList, setKegiatanList] = useState<Kegiatan[]>([]);
 
+  // Load kegiatan for libur filtering
+  useEffect(() => {
+    getKegiatan().then(setKegiatanList);
+  }, []);
+
+  const liburDates = useMemo(() => getLiburDates(kegiatanList), [kegiatanList]);
+
+  // Only active gens
   const activeGens = useMemo(
     () => genList.filter((g) => g.status === "aktif").map((g) => g.gen),
     [genList]
@@ -138,8 +148,8 @@ export default function DashboardPage() {
 
   // Shared data layer: fetch + cache per Gen, dipakai lintas route (PRD §4.1)
   const gensToLoad = useMemo(
-    () => (filters.gen === "semua" ? iterGens : [filters.gen as Gen]),
-    [filters.gen, iterGens]
+    () => (filters.gen === "semua" ? activeGens : [filters.gen as Gen]),
+    [filters.gen, activeGens]
   );
   const { records: allRecords, loading, refresh: loadRecords } = useTaggedRecords(gensToLoad);
   const { invalidate: invalidateRecordsCache } = useAttendanceData();
@@ -154,7 +164,7 @@ export default function DashboardPage() {
   // Reset page when filters change
   useEffect(() => {
     setPage(1);
-  }, [filters.gen, filters.kelas, filters.bulan, filters.tanggal, filters.status, filters.search]);
+  }, [filters.gen, filters.kelas, filters.bulan, filters.tanggalFrom, filters.tanggalTo, filters.status, filters.search]);
 
   // Fetch halaman tabel dari server (filter + sort di data layer)
   useEffect(() => {
@@ -167,7 +177,8 @@ export default function DashboardPage() {
       {
         kelas: filters.kelas || undefined,
         bulan: filters.bulan || undefined,
-        tanggal: filters.tanggal || undefined,
+        tanggalFrom: filters.tanggalFrom ? parseISOTanggal(filters.tanggalFrom) : undefined,
+        tanggalTo: filters.tanggalTo ? parseISOTanggal(filters.tanggalTo) : undefined,
         status: (filters.status || undefined) as StatusAbsen | undefined,
         search: filters.search || undefined,
       }
@@ -196,7 +207,8 @@ export default function DashboardPage() {
     filters.gen,
     filters.kelas,
     filters.bulan,
-    filters.tanggal,
+    filters.tanggalFrom,
+    filters.tanggalTo,
     filters.status,
     filters.search,
     page,
@@ -235,16 +247,31 @@ export default function DashboardPage() {
   // Client-side filtering (untuk stats, export, dan daftar per tanggal)
   const records = useMemo(() => {
     let result = allRecords;
+    // Exclude libur records from all calculations
+    if (liburDates.size > 0) {
+      result = result.filter((r) => !liburDates.has(r.tanggal));
+    }
     if (filters.kelas) result = result.filter((r) => r.kelas === filters.kelas);
     if (filters.bulan) result = result.filter((r) => r.bulanTahun === filters.bulan);
-    if (filters.tanggal) result = result.filter((r) => r.tanggal === filters.tanggal);
+    if (filters.tanggalFrom || filters.tanggalTo) {
+      const fromNum = filters.tanggalFrom
+        ? tanggalToNumber(parseISOTanggal(filters.tanggalFrom))
+        : -Infinity;
+      const toNum = filters.tanggalTo
+        ? tanggalToNumber(parseISOTanggal(filters.tanggalTo))
+        : Infinity;
+      result = result.filter((r) => {
+        const t = tanggalToNumber(r.tanggal);
+        return !Number.isNaN(t) && t >= fromNum && t <= toNum;
+      });
+    }
     if (filters.status) result = result.filter((r) => r.statusAbsen === filters.status);
     if (filters.search) {
       const q = filters.search.toLowerCase();
       result = result.filter((r) => r.nama.toLowerCase().includes(q));
     }
     return result;
-  }, [allRecords, filters.kelas, filters.bulan, filters.tanggal, filters.status, filters.search]);
+  }, [allRecords, liburDates, filters.kelas, filters.bulan, filters.tanggalFrom, filters.tanggalTo, filters.status, filters.search]);
 
   // Dynamic Dashboard Stats calculated from filtered records
   const stats = useMemo<DashboardStats>(() => {
@@ -314,12 +341,8 @@ export default function DashboardPage() {
   }, [records]);
 
   // Daily presensi meeting summaries (for stats view & quick jump)
+  // Derive from `records` (already gen+kelas+bulan+date filtered)
   const dailySummaries = useMemo(() => {
-    let source = allRecords;
-    if (filters.gen !== "semua") source = source.filter((r) => r._gen === filters.gen);
-    if (filters.bulan) source = source.filter((r) => r.bulanTahun === filters.bulan);
-    if (filters.kelas) source = source.filter((r) => r.kelas === filters.kelas);
-
     const map = new Map<
       string,
       {
@@ -335,8 +358,9 @@ export default function DashboardPage() {
       }
     >();
 
-    for (const r of source) {
+    for (const r of records) {
       if (!r.tanggal) continue;
+      if (liburDates.has(r.tanggal)) continue; // skip libur records
       const cur = map.get(r.tanggal) || {
         tanggal: r.tanggal,
         bulanTahun: r.bulanTahun,
@@ -365,7 +389,7 @@ export default function DashboardPage() {
       if (am !== bm) return bm - am;
       return bd - ad;
     });
-  }, [allRecords, filters.gen, filters.bulan, filters.kelas]);
+  }, [records, liburDates]);
 
   // Delete single record handler
   const confirmDeleteRecord = async () => {
@@ -543,11 +567,16 @@ export default function DashboardPage() {
     tableRecords.length > 0 && selectedKeys.size === tableRecords.length;
 
   // Export per gen per bulan — Excel format
-  const exportToExcel = () => {
+  const exportToExcel = async () => {
     if (records.length === 0) return;
 
+    const XLSX = await import("xlsx");
+
     const bulanSlug = filters.bulan ? `_${filters.bulan.replace("-", "")}` : "";
-    const tglSlug = filters.tanggal ? `_${filters.tanggal.replace(/\//g, "")}` : "";
+    const tglSlug =
+      filters.tanggalFrom || filters.tanggalTo
+        ? `_${(filters.tanggalFrom || filters.tanggalTo).replace(/-/g, "")}${filters.tanggalFrom && filters.tanggalTo && filters.tanggalFrom !== filters.tanggalTo ? "-" + filters.tanggalTo.replace(/-/g, "") : ""}`
+        : "";
 
     const wb = XLSX.utils.book_new();
 
@@ -577,7 +606,7 @@ export default function DashboardPage() {
       XLSX.utils.book_append_sheet(wb, allWs, "Semua Data");
 
       // 2. Individual Gen sheets
-      for (const g of iterGens) {
+      for (const g of activeGens) {
         const genRecs = records.filter((r) => r._gen === g);
         if (genRecs.length === 0) continue;
         const gRows = genRecs.map((r, i) => ({
@@ -678,7 +707,7 @@ export default function DashboardPage() {
       XLSX.utils.book_append_sheet(wb, studentWs, "Rekap Individu");
 
       // 4. Ringkasan per Gen
-      const genSummaryRows = iterGens.map((g, i) => {
+      const genSummaryRows = activeGens.map((g, i) => {
         const gRecs = records.filter((r) => r._gen === g);
         const uniqueStudents = new Set(gRecs.map((r) => `${r.kelas}|${r.nama}`));
         const hadir = gRecs.filter((r) => r.statusAbsen === "Hadir").length;
@@ -901,30 +930,30 @@ export default function DashboardPage() {
 
   const todayStats = useMemo(() => {
     const today = getTodayFormatted();
-    const todayRecords = allRecords.filter((r) => r.tanggal === today);
     const [dd, mm, yyyy] = today.split("/");
-    const total = todayRecords.length;
-    const hadir = todayRecords.filter((r) => r.statusAbsen === "Hadir").length;
-    const sakit = todayRecords.filter((r) => r.statusAbsen === "Sakit").length;
-    const izin = todayRecords.filter((r) => r.statusAbsen === "Izin").length;
-    const alfa = todayRecords.filter((r) => r.statusAbsen === "Alfa").length;
-    const kas = todayRecords.reduce((sum, r) => sum + r.nominalKas, 0);
+    let total = 0, hadir = 0, sakit = 0, izin = 0, alfa = 0, kas = 0;
+    for (const r of allRecords) {
+      if (r.tanggal !== today) continue;
+      if (liburDates.has(r.tanggal)) continue; // skip libur records
+      total++;
+      if (r.statusAbsen === "Hadir") hadir++;
+      else if (r.statusAbsen === "Sakit") sakit++;
+      else if (r.statusAbsen === "Izin") izin++;
+      else alfa++;
+      kas += r.nominalKas;
+    }
     return {
       today,
       dateLabel: `${dd} ${formatBulanTahun(`${mm}-${yyyy}`)}`,
-      total,
-      hadir,
-      sakit,
-      izin,
-      alfa,
-      kas,
+      total, hadir, sakit, izin, alfa, kas,
     };
-  }, [allRecords]);
+  }, [allRecords, liburDates]);
 
   const hasActiveFilter = Boolean(
     filters.kelas ||
       filters.bulan ||
-      filters.tanggal ||
+      filters.tanggalFrom ||
+      filters.tanggalTo ||
       filters.status ||
       filters.search
   );
@@ -952,18 +981,18 @@ export default function DashboardPage() {
         <div className="flex items-center gap-2">
           <div className="inline-flex items-center gap-1 rounded-xl border-2 border-border bg-surface p-1">
             <button
-              onClick={() => setViewMode("table")}
-              className={`chip min-h-[44px] ${viewMode === "table" ? "chip-on" : ""}`}
+              onClick={() => setViewMode("absensi")}
+              className={`chip min-h-[44px] ${viewMode === "absensi" ? "chip-on" : ""}`}
             >
               <TableIcon className="h-4 w-4" />
-              Tabel
+              Absensi
             </button>
             <button
-              onClick={() => setViewMode("stats")}
-              className={`chip min-h-[44px] ${viewMode === "stats" ? "chip-on" : ""}`}
+              onClick={() => setViewMode("rekap")}
+              className={`chip min-h-[44px] ${viewMode === "rekap" ? "chip-on" : ""}`}
             >
               <PieChartIcon className="h-4 w-4" />
-              Statistik
+              Rekap
             </button>
           </div>
           <Link href="/input" className="btn btn-primary min-h-[44px] px-3 py-2 text-sm">
@@ -974,55 +1003,23 @@ export default function DashboardPage() {
       </div>
 
       {/* Hari ini banner */}
-      <div className="card mt-4 p-4">
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <p className="text-xs font-bold uppercase tracking-wide text-muted">
-            Hari ini — {todayStats.dateLabel}
-          </p>
-          {todayStats.total > 0 && filters.tanggal !== todayStats.today && (
-            <button
-              onClick={() => setFilters((f) => ({ ...f, tanggal: todayStats.today }))}
-              className="inline-flex items-center gap-1 text-[11px] font-bold text-accent hover:underline"
-            >
-              <Calendar className="h-3 w-3" />
-              Filter Catatan Hari Ini
-            </button>
-          )}
-        </div>
-        {todayStats.total === 0 ? (
-          <p className="mt-2 text-xs text-muted">Belum ada catatan hari ini.</p>
-        ) : (
-          <div className="mt-2.5 flex flex-wrap gap-2">
-            {[
-              { label: "Total", value: todayStats.total, cls: "bg-surface-2 text-foreground" },
-              {
-                label: "Hadir",
-                value: todayStats.hadir,
-                cls: "bg-emerald-500/15 text-emerald-600 dark:text-emerald-300",
-              },
-              {
-                label: "Sakit",
-                value: todayStats.sakit,
-                cls: "bg-amber-500/15 text-amber-600 dark:text-amber-300",
-              },
-              { label: "Izin", value: todayStats.izin, cls: "bg-accent/15 text-accent" },
-              { label: "Alfa", value: todayStats.alfa, cls: "bg-danger/15 text-danger" },
-            ].map((s) => (
-              <span
-                key={s.label}
-                className={`badge ${s.cls} min-w-[48px] justify-center`}
-              >
-                {s.label} {s.value}
-              </span>
-            ))}
-            {todayStats.kas > 0 && (
-              <span className="badge bg-accent/10 text-accent min-w-[48px] justify-center">
-                Kas {formatRupiah(todayStats.kas)}
-              </span>
-            )}
-          </div>
-        )}
-      </div>
+      <TodayBanner
+        dateLabel={todayStats.dateLabel}
+        total={todayStats.total}
+        hadir={todayStats.hadir}
+        sakit={todayStats.sakit}
+        izin={todayStats.izin}
+        alfa={todayStats.alfa}
+        kas={todayStats.kas}
+        filters={filters}
+        onFilterToday={() =>
+          setFilters((f) => ({
+            ...f,
+            tanggalFrom: getTodayISO(),
+            tanggalTo: getTodayISO(),
+          }))
+        }
+      />
 
       {/* Filters Toolbar */}
       <FilterBar
@@ -1036,8 +1033,8 @@ export default function DashboardPage() {
         onExport={exportToExcel}
       />
 
-      {/* VIEW 1: TABLE (pagination + filter di server, PRD P2-6) */}
-      {viewMode === "table" && (
+      {/* VIEW 1: ABSENSI (pagination + filter di server, PRD P2-6) */}
+      {viewMode === "absensi" && (
         <AttendanceTable
           records={tableRecords}
           total={tableTotal}
@@ -1060,24 +1057,59 @@ export default function DashboardPage() {
             setDeleteModal({ open: true, rowId: r._rowId, record: r })
           }
           onStudentDetail={setStudentDetail}
-          onFilterTanggal={(tanggal) => setFilters((f) => ({ ...f, tanggal }))}
+          onFilterTanggal={(tanggal) => {
+            const iso = formatTanggalToISO(tanggal) || getTodayISO();
+            setFilters((f) => ({ ...f, tanggalFrom: iso, tanggalTo: iso }));
+          }}
           getGenBadgeColor={activeGenBadgeColor}
         />
       )}
 
-      {/* VIEW 2: STATS */}
-      {viewMode === "stats" && (
-        <StatsView
-          stats={stats}
-          records={records}
-          filters={filters}
-          onFiltersChange={setFilters}
-          dailySummaries={dailySummaries}
-          genSummaries={genSummaries}
-          onOpenTableMode={() => setViewMode("table")}
-          onStudentDetail={setStudentDetail}
-          getGenBadgeColor={activeGenBadgeColor}
-        />
+      {/* VIEW 2: REKAP */}
+      {viewMode === "rekap" && (
+        <>
+          {/* Sub-tabs: Ringkasan / Per Siswa */}
+          <div className="flex items-center gap-2">
+            <div className="inline-flex items-center gap-1 rounded-xl border-2 border-border bg-surface p-1">
+              <button
+                onClick={() => setRekapSubTab("ringkasan")}
+                className={`chip min-h-[44px] text-xs ${rekapSubTab === "ringkasan" ? "chip-on" : ""}`}
+              >
+                Ringkasan
+              </button>
+              <button
+                onClick={() => setRekapSubTab("siswa")}
+                className={`chip min-h-[44px] text-xs ${rekapSubTab === "siswa" ? "chip-on" : ""}`}
+              >
+                Per Siswa
+              </button>
+            </div>
+          </div>
+
+          {rekapSubTab === "ringkasan" && (
+            <StatsView
+              stats={stats}
+              records={records}
+              filters={filters}
+              onFiltersChange={setFilters}
+              dailySummaries={dailySummaries}
+              genSummaries={genSummaries}
+              onOpenTableMode={() => setViewMode("absensi")}
+              onStudentDetail={setStudentDetail}
+              getGenBadgeColor={activeGenBadgeColor}
+            />
+          )}
+
+          {rekapSubTab === "siswa" && (
+            <IndividualStatsInline
+              allRecords={allRecords}
+              filters={filters}
+              onFiltersChange={setFilters}
+              getGenBadgeColor={activeGenBadgeColor}
+              onStudentDetail={setStudentDetail}
+            />
+          )}
+        </>
       )}
 
       {/* Delete modal */}
@@ -1092,108 +1124,25 @@ export default function DashboardPage() {
 
       {/* Bulk delete modal */}
       {bulkDeleteModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-foreground/50 p-4">
-           <div className="card w-full max-w-sm p-6 shadow-lg">
-            <div className="flex items-start gap-3">
-              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border-2 border-danger/40 bg-danger/15">
-                <Trash2 className="h-4.5 w-4.5 text-danger" />
-              </div>
-              <div>
-                <h3 className="font-display text-base font-extrabold uppercase tracking-tight text-foreground">
-                  Hapus {selectedKeys.size} catatan?
-                </h3>
-                <p className="mt-0.5 text-xs font-medium text-muted">
-                  Tindakan ini tidak dapat dibatalkan.
-                </p>
-              </div>
-            </div>
-            <div className="mt-5 flex items-center justify-end gap-2">
-              <button
-                onClick={() => setBulkDeleteModal(false)}
-                disabled={bulkDeleting}
-                className="btn btn-secondary min-h-[44px] px-4 py-2 text-sm"
-              >
-                Batal
-              </button>
-              <button
-                onClick={confirmBulkDelete}
-                disabled={bulkDeleting}
-                className="btn btn-danger min-h-[44px] px-4 py-2 text-sm"
-              >
-                {bulkDeleting && <Loader2 className="h-4 w-4 animate-spin" />}
-                {bulkDeleting ? "Menghapus..." : "Hapus Semua"}
-              </button>
-            </div>
-          </div>
-        </div>
+        <BulkDeleteModal
+          count={selectedKeys.size}
+          deleting={bulkDeleting}
+          onConfirm={confirmBulkDelete}
+          onCancel={() => setBulkDeleteModal(false)}
+        />
       )}
 
       {/* Bulk move Gen modal */}
       {bulkMoveModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-foreground/50 p-4">
-          <div className="card w-full max-w-md p-6 shadow-lg">
-            <div className="flex items-start gap-3">
-              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border-2 border-accent/40 bg-accent/15">
-                <ArrowRightLeft className="h-4.5 w-4.5 text-accent" />
-              </div>
-              <div>
-                <h3 className="font-display text-base font-extrabold uppercase tracking-tight text-foreground">
-                  Pindah Gen ({selectedKeys.size} Catatan)
-                </h3>
-                <p className="mt-0.5 text-xs font-medium text-muted">
-                  Pindahkan seluruh data yang dipilih ke Generasi / Angkatan lain.
-                </p>
-              </div>
-            </div>
-
-            <div className="mt-4 space-y-3">
-              <div>
-                <label className="label">Pilih Gen Tujuan</label>
-                <div className="grid grid-cols-3 gap-2">
-                  {activeGens.map((g) => (
-                    <button
-                      key={g}
-                      type="button"
-                      onClick={() => setBulkMoveTargetGen(g)}
-                      className={`flex flex-col items-center justify-center rounded-xl border-2 p-2.5 transition-all text-center ${
-                        bulkMoveTargetGen === g
-                          ? getGenCardSelectedStyle(g)
-                          : "border-border bg-surface-2 text-foreground font-semibold hover:bg-surface"
-                      }`}
-                    >
-                      <span className="text-sm font-display">Gen {g}</span>
-                      <span className="text-[10px] text-muted">
-                        Angkatan {g}
-                      </span>
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              <p className="text-[11px] text-muted bg-surface-2 rounded-lg p-2.5 border border-border">
-                💡 Seluruh baris yang dipilih akan dipindahkan dari tab asal Google Sheets ke tab <strong>GEN {bulkMoveTargetGen}</strong>.
-              </p>
-            </div>
-
-            <div className="mt-5 flex items-center justify-end gap-2">
-              <button
-                onClick={() => setBulkMoveModal(false)}
-                disabled={bulkMoving}
-                className="btn btn-secondary min-h-[44px] px-4 py-2 text-sm"
-              >
-                Batal
-              </button>
-              <button
-                onClick={confirmBulkMove}
-                disabled={bulkMoving || !bulkMoveTargetGen}
-                className="btn btn-primary min-h-[44px] px-4 py-2 text-sm font-bold"
-              >
-                {bulkMoving && <Loader2 className="h-4 w-4 animate-spin" />}
-                {bulkMoving ? "Memindahkan..." : `Pindahkan ke Gen ${bulkMoveTargetGen}`}
-              </button>
-            </div>
-          </div>
-        </div>
+        <BulkMoveModal
+          count={selectedKeys.size}
+          activeGens={activeGens}
+          targetGen={bulkMoveTargetGen}
+          moving={bulkMoving}
+          onTargetChange={setBulkMoveTargetGen}
+          onConfirm={confirmBulkMove}
+          onCancel={() => setBulkMoveModal(false)}
+        />
       )}
 
       {/* Student detail modal */}
@@ -1205,152 +1154,27 @@ export default function DashboardPage() {
         />
       )}
 
-      {/* Edit modal (Supports changing Gen, Tanggal, Nama, Kelas, Status, Kas) */}
+      {/* Edit modal */}
       {editModal.open && editModal.record && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-foreground/50 p-4">
-          <div className="card w-full max-w-md p-6 shadow-lg">
-            <h3 className="font-display text-lg font-extrabold uppercase tracking-tight text-foreground">
-              Edit Data Absensi
-            </h3>
-            <p className="mt-0.5 text-xs font-semibold uppercase tracking-wide text-muted">
-              {editModal.record.nama} — Semula di Gen {editModal.record._gen}
-            </p>
-
-            <div className="mt-4 space-y-3.5">
-              {/* Gen Switcher */}
-              <div>
-                <label className="label !mb-1.5 flex items-center justify-between">
-                  <span>Generasi (Gen)</span>
-                  {editGen !== editModal.record._gen && (
-                    <span className="text-[10px] font-bold text-accent">
-                      Akan dipindahkan ke Gen {editGen}
-                    </span>
-                  )}
-                </label>
-                <div className="grid grid-cols-3 gap-2">
-                  {activeGens.map((g) => (
-                    <button
-                      key={g}
-                      type="button"
-                      onClick={() => setEditGen(g)}
-                      className={`flex flex-col items-center justify-center rounded-xl border-2 p-2 transition-all text-center ${
-                        editGen === g
-                          ? getGenCardSelectedStyle(g)
-                          : "border-border bg-surface-2 text-foreground font-semibold hover:bg-surface"
-                      }`}
-                    >
-                      <span className="text-xs font-display">Gen {g}</span>
-                      <span className="text-[10px] text-muted">
-                        Angkatan {g}
-                      </span>
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {/* Tanggal */}
-              <div>
-                <label className="label">Tanggal</label>
-                <input
-                  type="date"
-                  className="input"
-                  value={editTanggal}
-                  onChange={(e) => setEditTanggal(e.target.value)}
-                />
-              </div>
-
-              {/* Nama */}
-              <div>
-                <label className="label">Nama Siswa</label>
-                <input
-                  type="text"
-                  className="input font-medium uppercase"
-                  value={editNama}
-                  onChange={(e) => setEditNama(e.target.value.toUpperCase())}
-                />
-              </div>
-
-              {/* Kelas */}
-              <div>
-                <label className="label">Kelas</label>
-                <select
-                  className="select"
-                  value={editKelas}
-                  onChange={(e) => setEditKelas(e.target.value)}
-                >
-                  <optgroup label="Kelas X (Sepuluh)">
-                    {SKAGARA_CLASSES.filter((k) => k.startsWith("X ")).map((k) => (
-                      <option key={k} value={k}>
-                        {k}
-                      </option>
-                    ))}
-                  </optgroup>
-                  <optgroup label="Kelas XI (Sebelas)">
-                    {SKAGARA_CLASSES.filter((k) => k.startsWith("XI ")).map((k) => (
-                      <option key={k} value={k}>
-                        {k}
-                      </option>
-                    ))}
-                  </optgroup>
-                  <optgroup label="Kelas XII (Dua Belas)">
-                    {SKAGARA_CLASSES.filter((k) => k.startsWith("XII ")).map((k) => (
-                      <option key={k} value={k}>
-                        {k}
-                      </option>
-                    ))}
-                  </optgroup>
-                </select>
-              </div>
-
-              {/* Status */}
-              <div>
-                <label className="label">Status Absen</label>
-                <select
-                  className="select"
-                  value={editStatus}
-                  onChange={(e) => setEditStatus(e.target.value as StatusAbsen)}
-                >
-                  {(["Hadir", "Sakit", "Izin", "Alfa"] as StatusAbsen[]).map((s) => (
-                    <option key={s} value={s}>
-                      {s}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              {/* Kas */}
-              <div>
-                <label className="label">Nominal Kas (Rp)</label>
-                <input
-                  type="number"
-                  min="0"
-                  step="500"
-                  className="input tabular-nums"
-                  value={editKas}
-                  onChange={(e) => setEditKas(Number(e.target.value) || 0)}
-                />
-              </div>
-            </div>
-
-            <div className="mt-5 flex items-center justify-end gap-2">
-              <button
-                onClick={() => setEditModal({ open: false, rowId: "", record: null })}
-                disabled={editing}
-                className="btn btn-secondary min-h-[44px] px-4 py-2 text-sm"
-              >
-                Batal
-              </button>
-              <button
-                onClick={confirmEditRecord}
-                disabled={editing}
-                className="btn btn-primary min-h-[44px] px-4 py-2 text-sm"
-              >
-                {editing && <Loader2 className="h-4 w-4 animate-spin" />}
-                {editing ? "Menyimpan..." : "Simpan Perubahan"}
-              </button>
-            </div>
-          </div>
-        </div>
+        <EditRecordModal
+          record={editModal.record}
+          activeGens={activeGens}
+          editGen={editGen}
+          editTanggal={editTanggal}
+          editNama={editNama}
+          editKelas={editKelas}
+          editStatus={editStatus}
+          editKas={editKas}
+          saving={editing}
+          onGenChange={setEditGen}
+          onTanggalChange={setEditTanggal}
+          onNamaChange={setEditNama}
+          onKelasChange={setEditKelas}
+          onStatusChange={setEditStatus}
+          onKasChange={setEditKas}
+          onConfirm={confirmEditRecord}
+          onCancel={() => setEditModal({ open: false, rowId: "", record: null })}
+        />
       )}
 
       {/* Toast */}

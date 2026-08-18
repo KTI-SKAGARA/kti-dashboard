@@ -77,15 +77,13 @@ export default function LoginPage() {
             <label htmlFor="email" className="label">
               Email
             </label>
-            <div className="relative">
-              <Mail className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted" />
+            <div className={`flex items-center gap-2 rounded-[0.375rem] border bg-surface px-3 py-2 transition-colors focus-within:shadow-[0_0_0_3px_color-mix(in_srgb,var(--color-accent)_12%,transparent)] ${error ? "border-danger focus-within:border-danger" : "border-border focus-within:border-accent"}`}>
+              <Mail className="h-4 w-4 shrink-0 text-muted" />
               <input
                 id="email"
                 type="email"
                 autoComplete="email"
-                className={`input pl-9 ${
-                  error ? "!border-danger focus:!ring-danger/20" : ""
-                }`}
+                className="flex-1 min-w-0 bg-transparent text-sm text-foreground outline-none placeholder:text-muted"
                 placeholder="admin@skagara.sch.id"
                 value={email}
                 onChange={(e) => {
@@ -102,15 +100,13 @@ export default function LoginPage() {
             <label htmlFor="password" className="label">
               Password
             </label>
-            <div className="relative">
-              <KeyRound className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted" />
+            <div className={`flex items-center gap-2 rounded-[0.375rem] border bg-surface px-3 py-2 transition-colors focus-within:shadow-[0_0_0_3px_color-mix(in_srgb,var(--color-accent)_12%,transparent)] ${error ? "border-danger focus-within:border-danger" : "border-border focus-within:border-accent"}`}>
+              <KeyRound className="h-4 w-4 shrink-0 text-muted" />
               <input
                 id="password"
                 type={showPassword ? "text" : "password"}
                 autoComplete="current-password"
-                className={`input pl-9 pr-10 ${
-                  error ? "!border-danger focus:!ring-danger/20" : ""
-                }`}
+                className="flex-1 min-w-0 bg-transparent text-sm text-foreground outline-none placeholder:text-muted"
                 placeholder="Masukkan password..."
                 value={password}
                 onChange={(e) => {
@@ -121,7 +117,7 @@ export default function LoginPage() {
               <button
                 type="button"
                 onClick={() => setShowPassword(!showPassword)}
-                className="absolute right-2.5 top-1/2 -translate-y-1/2 p-1 text-muted hover:text-accent"
+                className="shrink-0 p-0.5 text-muted hover:text-accent"
                 aria-label="Tampilkan password"
               >
                 {showPassword ? (

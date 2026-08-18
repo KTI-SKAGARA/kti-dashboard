@@ -1,7 +1,8 @@
 "use client";
 
+import { memo } from "react";
 import { type Gen, type TaggedRecord } from "@/types/attendance";
-import { formatRupiah } from "@/lib/utils";
+import { formatRupiah, getStatusBadgeClass } from "@/lib/utils";
 import { PAGE_SIZE } from "@/lib/constants";
 import {
   Loader2,
@@ -36,7 +37,7 @@ interface AttendanceTableProps {
   getGenBadgeColor: (gen: Gen) => string;
 }
 
-export default function AttendanceTable({
+export default memo(function AttendanceTable({
   records,
   total,
   loading,
@@ -141,17 +142,7 @@ export default function AttendanceTable({
                     </td>
                     <td className="text-muted">{r.kelas}</td>
                     <td>
-                      <span
-                        className={`badge ${
-                          r.statusAbsen === "Hadir"
-                            ? "bg-emerald-500/15 text-emerald-600 dark:text-emerald-300"
-                            : r.statusAbsen === "Sakit"
-                            ? "bg-amber-500/15 text-amber-600 dark:text-amber-300"
-                            : r.statusAbsen === "Izin"
-                            ? "bg-accent/15 text-accent dark:text-accent"
-                            : "bg-danger/15 text-danger"
-                        }`}
-                      >
+                      <span className={`badge ${getStatusBadgeClass(r.statusAbsen)}`}>
                         {r.statusAbsen}
                       </span>
                     </td>
@@ -264,4 +255,4 @@ export default function AttendanceTable({
       )}
     </div>
   );
-}
+});

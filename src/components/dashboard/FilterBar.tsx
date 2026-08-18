@@ -1,9 +1,11 @@
 "use client";
 
+import { useMemo, memo } from "react";
 import { type FilterOptions, type FilterState, type Gen } from "@/types/attendance";
 import {
   formatBulanTahun,
   formatTanggalIndo,
+  parseISOTanggal,
 } from "@/lib/utils";
 import { SKAGARA_CLASSES } from "@/types/attendance";
 import { Search, FilterX, RefreshCw, Download, Calendar } from "lucide-react";
@@ -19,7 +21,7 @@ interface FilterBarProps {
   onExport: () => void;
 }
 
-export default function FilterBar({
+export default memo(function FilterBar({
   filters,
   onFiltersChange,
   filterOptions,
@@ -32,6 +34,14 @@ export default function FilterBar({
   const setFilters = (updater: (prev: FilterState) => FilterState) => {
     onFiltersChange(updater(filters));
   };
+
+  const mergedClasses = useMemo(
+    () =>
+      Array.from(new Set([...SKAGARA_CLASSES, ...filterOptions.kelasList])).sort(
+        (a, b) => a.localeCompare(b, "id")
+      ),
+    [filterOptions.kelasList]
+  );
 
   return (
     <div className="card mt-5 p-4 sm:p-5">
@@ -73,22 +83,29 @@ export default function FilterBar({
             </button>
           ))}
 
-          {/* Filter Tanggal Dropdown */}
-          <div className="relative">
-            <select
-              className={`select min-h-[44px] w-auto py-2 text-sm font-medium ${
-                filters.tanggal ? "!border-accent !bg-accent/10 !text-accent font-bold" : ""
-              }`}
-              value={filters.tanggal}
-              onChange={(e) => setFilters((f) => ({ ...f, tanggal: e.target.value }))}
-            >
-              <option value="">📅 Semua Tanggal</option>
-              {filterOptions.tanggalList.map((t) => (
-                <option key={t} value={t}>
-                  {formatTanggalIndo(t, true)} ({t})
-                </option>
-              ))}
-            </select>
+          {/* Filter Tanggal (Range Dari - Sampai) */}
+          <div className="flex items-center gap-1.5">
+            <input
+              type="date"
+              aria-label="Dari tanggal"
+              title="Dari tanggal"
+              value={filters.tanggalFrom}
+              onChange={(e) =>
+                setFilters((f) => ({ ...f, tanggalFrom: e.target.value }))
+              }
+              className="input min-h-[44px] w-auto text-sm"
+            />
+            <span className="text-xs font-bold text-muted">s/d</span>
+            <input
+              type="date"
+              aria-label="Sampai tanggal"
+              title="Sampai tanggal"
+              value={filters.tanggalTo}
+              onChange={(e) =>
+                setFilters((f) => ({ ...f, tanggalTo: e.target.value }))
+              }
+              className="input min-h-[44px] w-auto text-sm"
+            />
           </div>
 
           {/* Filter Bulan Dropdown */}
@@ -112,9 +129,7 @@ export default function FilterBar({
             onChange={(e) => setFilters((f) => ({ ...f, kelas: e.target.value }))}
           >
             <option value="">Semua Kelas</option>
-            {Array.from(new Set([...SKAGARA_CLASSES, ...filterOptions.kelasList]))
-              .sort((a, b) => a.localeCompare(b, "id"))
-              .map((k) => (
+            {mergedClasses.map((k) => (
                 <option key={k} value={k}>
                   {k}
                 </option>
@@ -124,14 +139,16 @@ export default function FilterBar({
 
         <div className="flex items-center gap-2">
           <div className="relative">
-            <Search className="absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted" />
-            <input
-              type="text"
-              placeholder="Cari nama..."
-              className="input min-h-[44px] w-44 pl-9 pr-3 text-sm sm:w-auto"
-              value={filters.search}
-              onChange={(e) => setFilters((f) => ({ ...f, search: e.target.value }))}
-            />
+            <div className="flex items-center gap-2 rounded-[0.375rem] border border-border bg-surface px-2.5 py-1.5 transition-colors focus-within:border-accent focus-within:shadow-[0_0_0_3px_color-mix(in_srgb,var(--color-accent)_12%,transparent)] min-h-[44px] w-44 sm:w-auto">
+              <Search className="h-4 w-4 shrink-0 text-muted" />
+              <input
+                type="text"
+                placeholder="Cari nama..."
+                className="flex-1 min-w-0 bg-transparent text-sm text-foreground outline-none placeholder:text-muted"
+                value={filters.search}
+                onChange={(e) => setFilters((f) => ({ ...f, search: e.target.value }))}
+              />
+            </div>
           </div>
           {hasActiveFilter && (
             <button
@@ -140,7 +157,8 @@ export default function FilterBar({
                   gen: filters.gen,
                   kelas: "",
                   bulan: "",
-                  tanggal: "",
+                  tanggalFrom: "",
+                  tanggalTo: "",
                   status: "",
                   search: "",
                 })
@@ -170,14 +188,27 @@ export default function FilterBar({
       </div>
 
       {/* Active Filter Badges */}
-      {filters.tanggal && (
+      {(filters.tanggalFrom || filters.tanggalTo) && (
         <div className="mt-3 flex items-center gap-2 rounded-lg border border-accent/30 bg-accent/5 px-3 py-2 text-xs">
           <Calendar className="h-4 w-4 text-accent" />
           <span className="font-semibold text-foreground">
-            Menampilkan data tanggal: <strong>{formatTanggalIndo(filters.tanggal)}</strong> ({filters.tanggal})
+            Menampilkan data rentang tanggal:{" "}
+            <strong>
+              {filters.tanggalFrom
+                ? `${formatTanggalIndo(parseISOTanggal(filters.tanggalFrom))} (${parseISOTanggal(filters.tanggalFrom)})`
+                : "Awal"}
+            </strong>{" "}
+            s/d{" "}
+            <strong>
+              {filters.tanggalTo
+                ? `${formatTanggalIndo(parseISOTanggal(filters.tanggalTo))} (${parseISOTanggal(filters.tanggalTo)})`
+                : "Sekarang"}
+            </strong>
           </span>
           <button
-            onClick={() => setFilters((f) => ({ ...f, tanggal: "" }))}
+            onClick={() =>
+              setFilters((f) => ({ ...f, tanggalFrom: "", tanggalTo: "" }))
+            }
             className="ml-auto text-xs font-bold text-accent hover:underline"
           >
             Reset Tanggal
@@ -186,4 +217,4 @@ export default function FilterBar({
       )}
     </div>
   );
-}
+});

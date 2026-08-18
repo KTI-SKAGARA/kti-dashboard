@@ -1,9 +1,13 @@
 "use client";
 
+import { memo } from "react";
 import { type FilterState, type Gen, type DashboardStats, type TaggedRecord } from "@/types/attendance";
 import {
   formatRupiah,
   formatTanggalIndo,
+  formatTanggalToISO,
+  parseISOTanggal,
+  getStatusBadgeClass,
 } from "@/lib/utils";
 import {
   Table as TableIcon,
@@ -44,7 +48,7 @@ interface StatsViewProps {
   getGenBadgeColor: (gen: Gen) => string;
 }
 
-export default function StatsView({
+export default memo(function StatsView({
   stats,
   records,
   filters,
@@ -59,22 +63,34 @@ export default function StatsView({
     onFiltersChange(updater(filters));
   };
 
+  const isSingleDate =
+    Boolean(filters.tanggalFrom) && filters.tanggalFrom === filters.tanggalTo;
+  const hasDateFilter = Boolean(filters.tanggalFrom || filters.tanggalTo);
+
+  const dateRangeLabel = hasDateFilter
+    ? filters.tanggalFrom === filters.tanggalTo
+      ? `${formatTanggalIndo(parseISOTanggal(filters.tanggalFrom))} (${parseISOTanggal(filters.tanggalFrom)})`
+      : `${filters.tanggalFrom ? formatTanggalIndo(parseISOTanggal(filters.tanggalFrom)) : "Awal"} s/d ${filters.tanggalTo ? formatTanggalIndo(parseISOTanggal(filters.tanggalTo)) : "Sekarang"}`
+    : "";
+
   return (
     <div className="mt-5 space-y-5">
       {/* Header detail if date filtered */}
-      {filters.tanggal && (
+      {hasDateFilter && (
         <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border-2 border-accent bg-accent/10 p-4">
           <div>
             <p className="text-[10px] font-bold uppercase tracking-wider text-accent">
-              Statistik Presensi Harian
+              {isSingleDate ? "Statistik Presensi Harian" : "Statistik Presensi Rentang Tanggal"}
             </p>
             <h2 className="text-base font-extrabold text-foreground">
-              Tanggal: {formatTanggalIndo(filters.tanggal)} ({filters.tanggal})
+              Tanggal: {dateRangeLabel}
             </h2>
           </div>
           <button
-            onClick={() => setFilters((f) => ({ ...f, tanggal: "" }))}
-            className="btn btn-secondary min-h-[40px] px-3 py-1.5 text-xs font-bold"
+            onClick={() =>
+              setFilters((f) => ({ ...f, tanggalFrom: "", tanggalTo: "" }))
+            }
+            className="btn btn-secondary min-h-[44px] px-3 py-1.5 text-xs font-bold"
           >
             Lihat Semua Tanggal
           </button>
@@ -92,7 +108,7 @@ export default function StatsView({
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         <div className="card p-5">
           <h2 className="font-display text-sm font-bold uppercase tracking-wide text-foreground">
-            Distribusi Kehadiran {filters.tanggal ? `(${filters.tanggal})` : ""}
+            Distribusi Kehadiran {hasDateFilter ? `(${dateRangeLabel})` : ""}
           </h2>
           {stats.totalRecords === 0 ? (
             <p className="py-6 text-center text-xs text-muted">Belum ada data.</p>
@@ -128,7 +144,7 @@ export default function StatsView({
 
         <div className="card p-5">
           <h2 className="font-display text-sm font-bold uppercase tracking-wide text-foreground">
-            Ringkasan Kas {filters.tanggal ? `(${filters.tanggal})` : ""}
+            Ringkasan Kas {hasDateFilter ? `(${dateRangeLabel})` : ""}
           </h2>
           <div className="mt-4 grid grid-cols-2 gap-3">
             <StatCard label="Total Kas" value={formatRupiah(stats.totalKas)} />
@@ -156,13 +172,13 @@ export default function StatsView({
         </div>
       </div>
 
-      {/* If date is filtered, show direct list of students on that date */}
-      {filters.tanggal ? (
+      {/* If single date is filtered, show direct list of students on that date */}
+      {isSingleDate ? (
         <div className="card p-5">
           <div className="flex flex-wrap items-center justify-between gap-2 border-b-2 border-border pb-3">
             <div>
               <h2 className="font-display text-sm font-bold uppercase tracking-wide text-foreground">
-                Daftar Siswa pada {formatTanggalIndo(filters.tanggal)}
+                Daftar Siswa pada {formatTanggalIndo(parseISOTanggal(filters.tanggalFrom))}
               </h2>
               <p className="text-xs text-muted">
                 Total {records.length} siswa tercatat pada tanggal ini
@@ -170,7 +186,7 @@ export default function StatsView({
             </div>
             <button
               onClick={onOpenTableMode}
-              className="btn btn-secondary min-h-[36px] px-3 py-1.5 text-xs font-bold"
+              className="btn btn-secondary min-h-[44px] px-3 py-1.5 text-xs font-bold"
             >
               <TableIcon className="h-3.5 w-3.5" />
               Buka di Mode Tabel
@@ -203,17 +219,7 @@ export default function StatsView({
                     </td>
                     <td className="text-muted">{r.kelas}</td>
                     <td>
-                      <span
-                        className={`badge ${
-                          r.statusAbsen === "Hadir"
-                            ? "bg-emerald-500/15 text-emerald-600 dark:text-emerald-300"
-                            : r.statusAbsen === "Sakit"
-                            ? "bg-amber-500/15 text-amber-600 dark:text-amber-300"
-                            : r.statusAbsen === "Izin"
-                            ? "bg-accent/15 text-accent"
-                            : "bg-danger/15 text-danger"
-                        }`}
-                      >
+                      <span className={`badge ${getStatusBadgeClass(r.statusAbsen)}`}>
                         {r.statusAbsen}
                       </span>
                     </td>
@@ -306,9 +312,14 @@ export default function StatsView({
                       <td className="text-center">
                         <button
                           onClick={() => {
-                            setFilters((f) => ({ ...f, tanggal: ds.tanggal }));
+                            const iso = formatTanggalToISO(ds.tanggal);
+                            setFilters((f) => ({
+                              ...f,
+                              tanggalFrom: iso || "",
+                              tanggalTo: iso || "",
+                            }));
                           }}
-                          className="btn btn-secondary min-h-[36px] px-2.5 py-1 text-xs font-bold"
+                          className="btn btn-secondary min-h-[44px] px-2.5 py-1 text-xs font-bold"
                           title={`Filter data presensi tanggal ${ds.tanggal}`}
                         >
                           <Eye className="h-3.5 w-3.5" />
@@ -406,4 +417,4 @@ export default function StatsView({
       )}
     </div>
   );
-}
+});

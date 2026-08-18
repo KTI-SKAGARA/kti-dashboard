@@ -222,7 +222,7 @@ export default function AttendanceCalendar({
             <button
               type="button"
               onClick={jumpToToday}
-              className="btn btn-ghost min-h-[38px] px-3 py-1.5 text-xs font-bold text-accent"
+              className="btn btn-ghost min-h-[44px] px-3 py-1.5 text-xs font-bold text-accent"
               title="Lompat ke hari ini"
             >
               Hari Ini
@@ -230,7 +230,7 @@ export default function AttendanceCalendar({
             <button
               type="button"
               onClick={handlePrevMonth}
-              className="btn btn-secondary min-h-[38px] min-w-[38px] p-2"
+              className="btn btn-secondary min-h-[44px] min-w-[44px] p-2"
               aria-label="Bulan sebelumnya"
             >
               <ChevronLeft className="h-4 w-4" />
@@ -238,7 +238,7 @@ export default function AttendanceCalendar({
             <button
               type="button"
               onClick={handleNextMonth}
-              className="btn btn-secondary min-h-[38px] min-w-[38px] p-2"
+              className="btn btn-secondary min-h-[44px] min-w-[44px] p-2"
               aria-label="Bulan berikutnya"
             >
               <ChevronRight className="h-4 w-4" />
@@ -354,7 +354,7 @@ export default function AttendanceCalendar({
               <button
                 type="button"
                 onClick={() => onSelectDate("")}
-                className="btn btn-ghost min-h-[38px] px-3 py-1.5 text-xs font-bold"
+                className="btn btn-ghost min-h-[44px] px-3 py-1.5 text-xs font-bold"
               >
                 Tutup Pilihan
               </button>
@@ -362,7 +362,7 @@ export default function AttendanceCalendar({
                 <button
                   type="button"
                   onClick={onOpenTableMode}
-                  className="btn btn-primary min-h-[38px] px-3 py-1.5 text-xs font-bold"
+                  className="btn btn-primary min-h-[44px] px-3 py-1.5 text-xs font-bold"
                 >
                   <ArrowRight className="h-3.5 w-3.5" />
                   Buka di Mode Tabel

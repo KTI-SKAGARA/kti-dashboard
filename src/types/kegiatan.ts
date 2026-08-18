@@ -65,14 +65,31 @@ export interface Kegiatan {
   jenis: JenisKegiatan;
 }
 
-export const STORAGE_KEY_KEGIATAN = "kti_kegiatan";
-
 /**
- * Get meeting dates from kegiatan data.
- * Meeting dates = dates with activities that are NOT "libur".
+ * Get REQUIRED meeting dates from kegiatan data.
+ * Only Saturday non-libur dates count as required meetings.
+ * Non-Saturday kegiatan are optional (attendance recorded but absence not penalized).
  * Returns a Set of DD/MM/YYYY strings.
  */
 export function getMeetingDates(kegiatanList: Kegiatan[]): Set<string> {
+  const dates = new Set<string>();
+  for (const k of kegiatanList) {
+    if (k.jenis === "libur") continue;
+    // Parse DD/MM/YYYY to check day of week
+    const [d, m, y] = k.tanggal.split("/").map(Number);
+    const dayOfWeek = new Date(y, m - 1, d).getDay(); // 0=Min, 6=Sab
+    if (dayOfWeek === 6) {
+      dates.add(k.tanggal);
+    }
+  }
+  return dates;
+}
+
+/**
+ * Get ALL non-libur kegiatan dates (for display, not for absence calculation).
+ * Includes both Saturday (required) and non-Saturday (optional) kegiatan.
+ */
+export function getAllKegiatanDates(kegiatanList: Kegiatan[]): Set<string> {
   const dates = new Set<string>();
   for (const k of kegiatanList) {
     if (k.jenis !== "libur") {
@@ -83,14 +100,15 @@ export function getMeetingDates(kegiatanList: Kegiatan[]): Set<string> {
 }
 
 /**
- * Load kegiatan from localStorage.
+ * Get libur (holiday) dates from kegiatan data.
+ * Returns a Set of DD/MM/YYYY strings.
  */
-export function loadKegiatan(): Kegiatan[] {
-  if (typeof window === "undefined") return [];
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY_KEGIATAN);
-    return raw ? JSON.parse(raw) : [];
-  } catch {
-    return [];
+export function getLiburDates(kegiatanList: Kegiatan[]): Set<string> {
+  const dates = new Set<string>();
+  for (const k of kegiatanList) {
+    if (k.jenis === "libur") {
+      dates.add(k.tanggal);
+    }
   }
+  return dates;
 }
