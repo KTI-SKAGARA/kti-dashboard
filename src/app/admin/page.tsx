@@ -925,9 +925,22 @@ export default function AdminPage() {
             <Loader2 className="h-5 w-5 animate-spin text-accent" />
           </div>
         ) : promosiProfiles.length === 0 ? (
-          <p className="py-6 text-center text-xs font-medium text-muted">
-            {promosiGen ? "Tidak ada siswa untuk gen ini." : "Pilih gen terlebih dahulu."}
-          </p>
+          <div className="py-6 text-center">
+            <p className="text-xs font-medium text-muted">
+              {promosiGen ? "Tidak ada siswa untuk gen ini." : "Pilih gen terlebih dahulu."}
+            </p>
+            {promosiGen && (
+              <button
+                onClick={() => {
+                  setActiveSection("siswa");
+                  setSelectedGenFilter(promosiGen);
+                }}
+                className="mt-2 text-xs font-semibold text-accent hover:underline"
+              >
+                Import dulu dari tab Siswa →
+              </button>
+            )}
+          </div>
         ) : (
           <>
             <div className="mt-4 overflow-x-auto">
