@@ -41,7 +41,7 @@ export default function MonthlyReportView({ report, loading }: Props) {
         h1 { font-size: 16px; }
         h2 { font-size: 14px; margin-top: 20px; }
       </style></head><body>
-        <h1>KTI MANAGEMENT — Laporan Keuangan</h1>
+        <h1>KTI OPS — Laporan Keuangan</h1>
         <p>Bulan: ${report.bulan_tahun}</p>
         <table>
           <tr><td>Total Pemasukan</td><td class="text-right font-bold">${formatRupiah(report.income)}</td></tr>

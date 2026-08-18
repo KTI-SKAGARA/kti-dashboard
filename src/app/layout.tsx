@@ -6,13 +6,13 @@ import SWRegister from "@/components/SWRegister";
 import { AttendanceDataProvider } from "@/hooks/useAttendanceData";
 
 export const metadata: Metadata = {
-  title: "KTI MANAGEMENT — Absensi, Keuangan & Kas (SMK Negeri 3 Jepara)",
+  title: "KTI OPS — Absensi, Keuangan & Kas (SMK Negeri 3 Jepara)",
   description:
     "Sistem Manajemen Absensi, Keuangan, dan Kas Rutin Organisasi KTI SMK Negeri 3 Jepara (SKAGARA). Terhubung dengan Google Sheets & Supabase.",
   appleWebApp: {
     capable: true,
     statusBarStyle: "default",
-    title: "KTI MANAGEMENT",
+    title: "KTI OPS",
   },
 };
 
