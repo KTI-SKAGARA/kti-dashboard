@@ -6,7 +6,7 @@ import { useEffect, useState } from "react";
 import { useTheme } from "next-themes";
 import { getAppConfig } from "@/app/actions/attendance";
 import { getCurrentUser } from "@/app/actions/auth";
-import { APP_NAME, SCHOOL_NAME } from "@/lib/constants";
+import { APP_NAME, SCHOOL_NAME, ORG_NAME } from "@/lib/constants";
 import ChangePasswordModal from "@/components/ChangePasswordModal";
 import {
   LogOut,
@@ -103,7 +103,7 @@ export default function Navbar() {
               className="h-8 w-8 rounded-lg border-2 border-foreground/20 object-cover"
             />
             <span className="font-display text-sm font-extrabold uppercase tracking-tight text-foreground">
-              KTI SKAGARA
+              {ORG_NAME}
             </span>
             <span className="hidden text-[10px] font-semibold uppercase tracking-widest text-muted sm:inline">
               {SCHOOL_NAME}

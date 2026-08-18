@@ -622,7 +622,7 @@ export default function DashboardPage() {
     const wb = XLSX.utils.book_new();
 
     if (filters.gen === "semua") {
-      // 1. All records combined sheet
+      // 1. All records combined sheet (tanpa kolom kas — kas sudah dipisah)
       const allRows = records.map((r, i) => ({
         No: i + 1,
         Gen: `GEN ${r._gen}`,
@@ -630,7 +630,6 @@ export default function DashboardPage() {
         Nama: r.nama,
         Kelas: r.kelas,
         Status_Absen: r.statusAbsen,
-        Nominal_Kas: r.nominalKas,
         Bulan_Tahun: r.bulanTahun,
       }));
       const allWs = XLSX.utils.json_to_sheet(allRows);
@@ -640,7 +639,6 @@ export default function DashboardPage() {
         { wch: 12 },
         { wch: 24 },
         { wch: 12 },
-        { wch: 14 },
         { wch: 14 },
         { wch: 12 },
       ];
@@ -656,7 +654,6 @@ export default function DashboardPage() {
           Nama: r.nama,
           Kelas: r.kelas,
           Status_Absen: r.statusAbsen,
-          Nominal_Kas: r.nominalKas,
           Bulan_Tahun: r.bulanTahun,
         }));
         const gWs = XLSX.utils.json_to_sheet(gRows);
@@ -665,7 +662,6 @@ export default function DashboardPage() {
           { wch: 12 },
           { wch: 24 },
           { wch: 12 },
-          { wch: 14 },
           { wch: 14 },
           { wch: 12 },
         ];
@@ -683,7 +679,6 @@ export default function DashboardPage() {
           sakit: number;
           izin: number;
           alfa: number;
-          kas: number;
         }
       >();
 
@@ -697,13 +692,11 @@ export default function DashboardPage() {
           sakit: 0,
           izin: 0,
           alfa: 0,
-          kas: 0,
         };
         if (r.statusAbsen === "Hadir") s.hadir += 1;
         else if (r.statusAbsen === "Sakit") s.sakit += 1;
         else if (r.statusAbsen === "Izin") s.izin += 1;
         else s.alfa += 1;
-        s.kas += r.nominalKas;
         students.set(key, s);
       }
 
@@ -728,7 +721,6 @@ export default function DashboardPage() {
             Alfa: s.alfa,
             Total: total,
             "Kehadiran (%)": total > 0 ? Math.round((s.hadir / total) * 1000) / 10 : 0,
-            "Total Kas": s.kas,
           };
         });
       const studentWs = XLSX.utils.json_to_sheet(studentRows);
@@ -743,7 +735,6 @@ export default function DashboardPage() {
         { wch: 8 },
         { wch: 8 },
         { wch: 14 },
-        { wch: 14 },
       ];
       XLSX.utils.book_append_sheet(wb, studentWs, "Rekap Individu");
 
@@ -756,7 +747,6 @@ export default function DashboardPage() {
         const izin = gRecs.filter((r) => r.statusAbsen === "Izin").length;
         const alfa = gRecs.filter((r) => r.statusAbsen === "Alfa").length;
         const total = gRecs.length;
-        const kas = gRecs.reduce((sum, r) => sum + r.nominalKas, 0);
 
         return {
           No: i + 1,
@@ -768,7 +758,6 @@ export default function DashboardPage() {
           Izin: izin,
           Alfa: alfa,
           "Kehadiran (%)": total > 0 ? Math.round((hadir / total) * 1000) / 10 : 0,
-          "Total Kas": kas,
         };
       });
       const genSummaryWs = XLSX.utils.json_to_sheet(genSummaryRows);
@@ -781,7 +770,6 @@ export default function DashboardPage() {
         { wch: 8 },
         { wch: 8 },
         { wch: 8 },
-        { wch: 14 },
         { wch: 14 },
       ];
       XLSX.utils.book_append_sheet(wb, genSummaryWs, "Ringkasan per Gen");
@@ -796,7 +784,6 @@ export default function DashboardPage() {
         Nama: r.nama,
         Kelas: r.kelas,
         Status_Absen: r.statusAbsen,
-        Nominal_Kas: r.nominalKas,
         Bulan_Tahun: r.bulanTahun,
       }));
       const rawWs = XLSX.utils.json_to_sheet(data);
@@ -805,7 +792,6 @@ export default function DashboardPage() {
         { wch: 12 },
         { wch: 24 },
         { wch: 12 },
-        { wch: 14 },
         { wch: 14 },
         { wch: 12 },
       ];
@@ -819,7 +805,6 @@ export default function DashboardPage() {
           sakit: number;
           izin: number;
           alfa: number;
-          kas: number;
         }
       >();
       const classes = new Map<
@@ -831,7 +816,6 @@ export default function DashboardPage() {
           sakit: number;
           izin: number;
           alfa: number;
-          kas: number;
         }
       >();
 
@@ -844,13 +828,11 @@ export default function DashboardPage() {
           sakit: 0,
           izin: 0,
           alfa: 0,
-          kas: 0,
         };
         if (r.statusAbsen === "Hadir") s.hadir += 1;
         else if (r.statusAbsen === "Sakit") s.sakit += 1;
         else if (r.statusAbsen === "Izin") s.izin += 1;
         else s.alfa += 1;
-        s.kas += r.nominalKas;
         students.set(key, s);
 
         const c = classes.get(r.kelas) || {
@@ -860,7 +842,6 @@ export default function DashboardPage() {
           sakit: 0,
           izin: 0,
           alfa: 0,
-          kas: 0,
         };
         c.siswa.add(r.nama);
         c.total += 1;
@@ -868,7 +849,6 @@ export default function DashboardPage() {
         else if (r.statusAbsen === "Sakit") c.sakit += 1;
         else if (r.statusAbsen === "Izin") c.izin += 1;
         else c.alfa += 1;
-        c.kas += r.nominalKas;
         classes.set(r.kelas, c);
       }
 
@@ -898,7 +878,6 @@ export default function DashboardPage() {
             Math.round(
               (s.hadir / (s.hadir + s.sakit + s.izin + s.alfa)) * 1000
             ) / 10,
-          "Total Kas": s.kas,
         }));
       const studentWs = XLSX.utils.json_to_sheet(studentRows);
       studentWs["!cols"] = [
@@ -910,7 +889,6 @@ export default function DashboardPage() {
         { wch: 8 },
         { wch: 8 },
         { wch: 8 },
-        { wch: 14 },
         { wch: 14 },
       ];
 
@@ -927,7 +905,6 @@ export default function DashboardPage() {
           Alfa: c.alfa,
           "Kehadiran (%)":
             Math.round((c.hadir / c.total) * 1000) / 10,
-          "Total Kas": c.kas,
         };
       });
       const classWs = XLSX.utils.json_to_sheet(classRows);

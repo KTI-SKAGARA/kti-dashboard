@@ -1,4 +1,17 @@
--- Finance system: expenses, categories, budgets
+-- Finance system: expenses, categories, budgets, kas_payments
+
+-- Pembayaran kas (pisah dari absensi)
+CREATE TABLE IF NOT EXISTS kas_payments (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  nama TEXT NOT NULL,
+  gen TEXT NOT NULL,
+  kelas TEXT NOT NULL,
+  bulan_tahun TEXT NOT NULL,
+  tanggal TEXT NOT NULL,
+  nominal NUMERIC NOT NULL CHECK (nominal >= 0),
+  linked_record_id TEXT,
+  created_at TIMESTAMPTZ DEFAULT now()
+);
 
 -- Kategori pengeluaran
 CREATE TABLE IF NOT EXISTS expense_categories (
@@ -36,9 +49,13 @@ CREATE TABLE IF NOT EXISTS budgets (
 );
 
 -- RLS
+ALTER TABLE kas_payments ENABLE ROW LEVEL SECURITY;
 ALTER TABLE expense_categories ENABLE ROW LEVEL SECURITY;
 ALTER TABLE expenses ENABLE ROW LEVEL SECURITY;
 ALTER TABLE budgets ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "kas_payments_read" ON kas_payments FOR SELECT USING (true);
+CREATE POLICY "kas_payments_write" ON kas_payments FOR ALL USING (true) WITH CHECK (true);
 
 CREATE POLICY "expense_categories_read" ON expense_categories FOR SELECT USING (true);
 CREATE POLICY "expense_categories_write" ON expense_categories FOR ALL USING (true) WITH CHECK (true);
@@ -50,6 +67,9 @@ CREATE POLICY "budgets_read" ON budgets FOR SELECT USING (true);
 CREATE POLICY "budgets_write" ON budgets FOR ALL USING (true) WITH CHECK (true);
 
 -- Indexes
+CREATE INDEX IF NOT EXISTS idx_kas_payments_nama ON kas_payments(nama);
+CREATE INDEX IF NOT EXISTS idx_kas_payments_gen ON kas_payments(gen);
+CREATE INDEX IF NOT EXISTS idx_kas_payments_bulan_tahun ON kas_payments(bulan_tahun);
 CREATE INDEX IF NOT EXISTS idx_expenses_bulan_tahun ON expenses(bulan_tahun);
 CREATE INDEX IF NOT EXISTS idx_expenses_category ON expenses(category_id);
 CREATE INDEX IF NOT EXISTS idx_expenses_status ON expenses(status);

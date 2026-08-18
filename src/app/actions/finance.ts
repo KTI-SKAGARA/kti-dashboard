@@ -2,7 +2,6 @@
 
 import { createClient } from "@/lib/supabase/server";
 import { requireAdmin } from "@/lib/supabase/auth-helpers";
-import { fetchRecords } from "@/lib/google-sheets";
 import type { ApiResponse, Gen } from "@/types/attendance";
 import type {
   ExpenseCategory,
@@ -277,26 +276,39 @@ export async function deleteBudget(id: string): Promise<ApiResponse<void>> {
 }
 
 // ---------------------------------------------------------------------------
-// Finance Summary (Income from Google Sheets + Expenses from Supabase)
+// Finance Summary (Income from kas_payments + Expenses from Supabase)
 // ---------------------------------------------------------------------------
 
 export async function getFinanceSummary(
   gens: Gen[]
 ): Promise<ApiResponse<FinanceSummary>> {
   try {
-    // Income: sum nominalKas from all attendance records
-    const incomeByGen: { gen: string; total: number }[] = [];
+    const supabase = await createClient();
+
+    // Income: read from kas_payments (pisah dari absensi)
+    const { data: kasRows } = await supabase
+      .from("kas_payments")
+      .select("gen, nominal, bulan_tahun");
+
+    const incomeByGenMap = new Map<string, number>();
+    const monthIncomeMap = new Map<string, number>();
     let totalIncome = 0;
 
-    for (const gen of gens) {
-      const records = await fetchRecords(gen);
-      const genTotal = records.reduce((sum, r) => sum + (r.nominalKas || 0), 0);
-      incomeByGen.push({ gen, total: genTotal });
-      totalIncome += genTotal;
+    for (const r of kasRows || []) {
+      const gen = String(r.gen);
+      const nominal = Number(r.nominal) || 0;
+      const bt = String(r.bulan_tahun);
+
+      if (gens.includes(gen as Gen)) {
+        incomeByGenMap.set(gen, (incomeByGenMap.get(gen) || 0) + nominal);
+        monthIncomeMap.set(bt, (monthIncomeMap.get(bt) || 0) + nominal);
+        totalIncome += nominal;
+      }
     }
 
+    const incomeByGen = Array.from(incomeByGenMap.entries()).map(([gen, total]) => ({ gen, total }));
+
     // Expenses from Supabase
-    const supabase = await createClient();
     const { data: expenseRows } = await supabase
       .from("expenses")
       .select("nominal, bulan_tahun, expense_categories(nama)")
@@ -329,28 +341,11 @@ export async function getFinanceSummary(
       total,
     }));
 
-    // Monthly trend (last 6 months)
+    // Monthly trend
     const monthMap = new Map<string, { income: number; expenses: number }>();
 
-    for (const gi of incomeByGen) {
-      // We need per-month breakdown — re-fetch with month info
-      // Actually we already have allRecords; let's compute per-month from records
-    }
-
-    // Per-month income from all gens
-    const allRecords: { bulanTahun: string; nominalKas: number }[] = [];
-    for (const gen of gens) {
-      const records = await fetchRecords(gen);
-      for (const r of records) {
-        allRecords.push({ bulanTahun: r.bulanTahun, nominalKas: r.nominalKas || 0 });
-      }
-    }
-
-    for (const r of allRecords) {
-      if (!r.bulanTahun) continue;
-      const cur = monthMap.get(r.bulanTahun) || { income: 0, expenses: 0 };
-      cur.income += r.nominalKas;
-      monthMap.set(r.bulanTahun, cur);
+    for (const [bt, income] of monthIncomeMap) {
+      monthMap.set(bt, { income, expenses: 0 });
     }
 
     for (const e of expenses) {
@@ -393,21 +388,23 @@ export async function getMonthlyReport(
   gens: Gen[]
 ): Promise<ApiResponse<MonthlyReport>> {
   try {
-    // Income for this month
+    // Income for this month from kas_payments
+    const supabase = await createClient();
+    const genStrings = gens.map((g) => String(g));
+    const { data: kasRows } = await supabase
+      .from("kas_payments")
+      .select("nominal")
+      .eq("bulan_tahun", bulanTahun)
+      .in("gen", genStrings);
+
     let income = 0;
     let attendanceCount = 0;
-    for (const gen of gens) {
-      const records = await fetchRecords(gen);
-      for (const r of records) {
-        if (r.bulanTahun === bulanTahun) {
-          income += r.nominalKas || 0;
-          attendanceCount++;
-        }
-      }
+    for (const r of kasRows || []) {
+      income += Number(r.nominal) || 0;
+      attendanceCount++;
     }
 
     // Expenses for this month
-    const supabase = await createClient();
     const { data: expenseRows } = await supabase
       .from("expenses")
       .select("nominal, expense_categories(nama)")

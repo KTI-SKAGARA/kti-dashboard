@@ -387,6 +387,23 @@ export async function submitAttendanceRecord(formData: {
 
     await appendRecord(formData.gen, record);
 
+    // Insert ke kas_payments kalau ada nominal kas
+    if (formData.nominalKas > 0) {
+      try {
+        const supabase = await createClient();
+        await supabase.from("kas_payments").insert({
+          nama: formattedNama,
+          gen: formData.gen,
+          kelas: normalizeKelas(formData.kelas),
+          bulan_tahun: getBulanTahunFromDate(formData.tanggal),
+          tanggal: formData.tanggal,
+          nominal: formData.nominalKas,
+        });
+      } catch {
+        // kas_payments insert gagal — attendance tetap tersimpan
+      }
+    }
+
     return { success: true };
   } catch (error) {
     return {
@@ -432,6 +449,26 @@ export async function submitBulkAttendance(
     }));
 
     await appendRecords(gen, records);
+
+    // Insert ke kas_payments untuk yang bayar kas
+    const kasEntries = records.filter((r) => r.nominalKas > 0);
+    if (kasEntries.length > 0) {
+      try {
+        const supabase = await createClient();
+        await supabase.from("kas_payments").insert(
+          kasEntries.map((r) => ({
+            nama: r.nama,
+            gen,
+            kelas: r.kelas,
+            bulan_tahun: r.bulanTahun,
+            tanggal: r.tanggal,
+            nominal: r.nominalKas,
+          }))
+        );
+      } catch {
+        // kas_payments insert gagal — attendance tetap tersimpan
+      }
+    }
 
     return { success: true, data: { saved: records.length } };
   } catch (error) {
