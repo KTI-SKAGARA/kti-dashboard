@@ -54,3 +54,14 @@ export interface MonthlyReport {
   expenseBreakdown: { category: string; nominal: number }[];
   attendanceCount: number;
 }
+
+export interface KasPayment {
+  id: string;
+  nama: string;
+  gen: string;
+  kelas: string;
+  bulan_tahun: string;
+  tanggal: string;
+  nominal: number;
+  created_at: string;
+}
