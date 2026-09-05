@@ -110,8 +110,26 @@ export function calculateStudentKas(
     };
   }
 
+  // Dedup: gabungkan record yang memiliki tanggal + statusAbsen sama
+  // (mencegah inflasi hitungan akibat double-submit)
+  const dedupedMap = new Map<string, TaggedRecord>();
+  for (const r of records) {
+    const key = `${r.tanggal}|${r.statusAbsen}`;
+    const existing = dedupedMap.get(key);
+    if (existing) {
+      // Gabungkan: jumlahkan nominalKas, pertahankan record terbaru
+      dedupedMap.set(key, {
+        ...existing,
+        nominalKas: (Number(existing.nominalKas) || 0) + (Number(r.nominalKas) || 0),
+      });
+    } else {
+      dedupedMap.set(key, r);
+    }
+  }
+  const deduped = Array.from(dedupedMap.values());
+
   // Urutkan kronologis dari pertemuan terlama ke terbaru
-  const sorted = [...records].sort(
+  const sorted = deduped.sort(
     (a, b) => parseTanggalToTime(a.tanggal) - parseTanggalToTime(b.tanggal)
   );
 
@@ -158,10 +176,10 @@ export function calculateStudentKas(
 
         if (paid === 0) {
           status = "LUNAS_ALIHAN";
-          statusLabel = "Lunas (Alihan)";
+          statusLabel = `Lunas (Alihan ${formatRupiah(carriedFromPrevious)})`;
           badgeClass =
             "bg-blue-500/15 text-blue-600 dark:text-blue-300 border-blue-500/30";
-          explanation = `Kewajiban ${formatRupiah(required)} terpenuhi penuh dari alihan saldo minggu sebelumnya.`;
+          explanation = `Kewajiban ${formatRupiah(required)} terpenuhi penuh dari alihan saldo minggu sebelumnya (${formatRupiah(carriedFromPrevious)}).`;
         } else if (paid > required) {
           status = "BAYAR_LEBIH";
           statusLabel = `Bayar Lebih (+${formatRupiah(carriedToNext)})`;
@@ -170,7 +188,7 @@ export function calculateStudentKas(
           explanation = `Bayar ${formatRupiah(paid)}. Digunakan ${formatRupiah(usedThisMeeting)}, sisa ${formatRupiah(carriedToNext)} dialihkan ke minggu selanjutnya.`;
         } else if (carriedFromPrevious > 0) {
           status = "LUNAS_ALIHAN";
-          statusLabel = "Lunas (Sebagian Alihan)";
+          statusLabel = `Lunas (${formatRupiah(paid)} + Alihan ${formatRupiah(carriedFromPrevious)})`;
           badgeClass =
             "bg-blue-500/15 text-blue-600 dark:text-blue-300 border-blue-500/30";
           explanation = `Bayar ${formatRupiah(paid)} + alihan ${formatRupiah(carriedFromPrevious)} melunasi kewajiban ${formatRupiah(required)}.`;
