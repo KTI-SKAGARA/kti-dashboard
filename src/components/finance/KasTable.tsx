@@ -68,7 +68,7 @@ export default function KasTable({ payments, loading }: Props) {
                   {items.map((p) => (
                     <tr key={p.id}>
                       <td className="text-xs">{p.tanggal}</td>
-                      <td className="text-xs font-medium uppercase">{p.nama}</td>
+                      <td title={p.nama} className="max-w-[200px] truncate text-xs font-medium uppercase">{p.nama}</td>
                       <td>
                         <span className="badge bg-surface-2 text-foreground text-[10px]">
                           Gen {p.gen}

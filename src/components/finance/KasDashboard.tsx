@@ -615,6 +615,7 @@ export default function KasDashboard({
                     <div className="min-w-0 flex-1">
                       <p
                         onClick={() => setSelectedStudent(s)}
+                        title={s.nama}
                         className="font-display text-sm font-extrabold uppercase tracking-tight text-foreground truncate cursor-pointer group-hover:text-accent transition-colors"
                       >
                         {s.nama}
@@ -738,7 +739,7 @@ export default function KasDashboard({
                             <span className="font-mono text-[10px] text-muted w-5 text-right shrink-0">
                               {idx + 1}.
                             </span>
-                            <span className="truncate group-hover:text-accent transition-colors font-bold text-xs">
+                            <span title={s.nama} className="truncate group-hover:text-accent transition-colors font-bold text-xs">
                               {s.nama}
                             </span>
                           </div>

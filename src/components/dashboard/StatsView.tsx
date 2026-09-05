@@ -289,9 +289,10 @@ export default memo(function StatsView({
                 {records.map((r, i) => (
                   <tr key={`${r._gen}-${r.nama}-${r._rowId}`}>
                     <td className="text-muted tabular-nums">{i + 1}</td>
-                    <td className="font-medium uppercase text-foreground">
+                    <td className="max-w-[200px] truncate font-medium uppercase text-foreground">
                       <button
                         onClick={() => onStudentDetail(r.nama)}
+                        title={r.nama}
                         className="hover:text-accent hover:underline"
                       >
                         {r.nama}
