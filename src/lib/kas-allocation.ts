@@ -48,7 +48,7 @@ export interface StudentKasSummary {
   netBalance: number; // totalPaid - totalRequired
   coveredWeeksCount: number; // Berapa minggu ke depan yang tercover oleh saldo lebih
   unpaidMeetingsCount: number; // Berapa pertemuan yang masih menunggak
-  status: "LUNAS" | "LEBIH" | "MENUNGGAK";
+  status: "LUNAS" | "LEBIH" | "MENUNGGAK" | "KURANG";
   statusBadge: string;
   statusText: string;
   meetings: MeetingKasDetail[];
@@ -65,6 +65,7 @@ export interface OrgKasSummary {
     lunas: number;
     lebih: number;
     menunggak: number;
+    kurang: number;
   };
 }
 
@@ -272,7 +273,7 @@ export function calculateStudentKas(
   // Total tunggakan adalah total shortage yang ada
   const currentDebt = meetings.reduce((acc, m) => acc + m.shortage, 0);
 
-  let overallStatus: "LUNAS" | "LEBIH" | "MENUNGGAK" = "LUNAS";
+  let overallStatus: "LUNAS" | "LEBIH" | "MENUNGGAK" | "KURANG" = "LUNAS";
   let statusBadge =
     "bg-emerald-500/15 text-emerald-600 dark:text-emerald-300 border-emerald-500/30";
   let statusText = "Lunas";
@@ -280,13 +281,14 @@ export function calculateStudentKas(
     defaultNominal > 0 ? Math.floor(currentSurplus / defaultNominal) : 0;
 
   if (currentDebt > 0) {
-    overallStatus = "MENUNGGAK";
     // Cek apakah ada yang belum bayar sama sekali (MENUNGGAK) atau hanya kurang (KURANG)
     const hasFullyUnpaid = meetings.some((m) => m.status === "MENUNGGAK");
     if (hasFullyUnpaid) {
+      overallStatus = "MENUNGGAK";
       statusBadge = "bg-danger/15 text-danger border-danger/30";
       statusText = `Nunggak ${formatRupiah(currentDebt)}`;
     } else {
+      overallStatus = "KURANG";
       statusBadge = "bg-amber-500/15 text-amber-600 dark:text-amber-300 border-amber-500/30";
       statusText = `Kurang ${formatRupiah(currentDebt)}`;
     }
@@ -378,6 +380,7 @@ export function calculateAllStudentsKas(
   let lunasCount = 0;
   let lebihCount = 0;
   let menunggakCount = 0;
+  let kurangCount = 0;
 
   for (const s of students) {
     totalPaid += s.totalPaid;
@@ -388,6 +391,7 @@ export function calculateAllStudentsKas(
     if (s.status === "LUNAS") lunasCount++;
     else if (s.status === "LEBIH") lebihCount++;
     else if (s.status === "MENUNGGAK") menunggakCount++;
+    else if (s.status === "KURANG") kurangCount++;
   }
 
   const complianceRate =
@@ -406,6 +410,7 @@ export function calculateAllStudentsKas(
       lunas: lunasCount,
       lebih: lebihCount,
       menunggak: menunggakCount,
+      kurang: kurangCount,
     },
   };
 
