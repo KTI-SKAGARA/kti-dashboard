@@ -736,15 +736,12 @@ export async function recordDirectKasPayment(params: {
           nominalKas,
         });
       } else {
-        // Buat record baru jika belum ada absensi di tanggal tersebut
-        await appendRecord(gen, {
-          tanggal,
-          nama: formattedNama,
-          kelas: formattedKelas,
-          statusAbsen: "Hadir",
-          nominalKas,
-          bulanTahun,
-        });
+        // Tidak buat record baru otomatis — bendahara harus input absensi dulu
+        // agar status kehadiran (Hadir/Sakit/Izin/Alfa) dicatat dengan benar
+        return {
+          success: false,
+          error: `Belum ada data absensi untuk ${formattedNama} tanggal ${tanggal}. Silakan input absensi terlebih dahulu.`,
+        };
       }
     }
 

@@ -160,6 +160,8 @@ export default function WhatsAppRekapModal({
           let badge = "✅ Lunas";
           if (s.status === "MENUNGGAK") {
             badge = `⚠️ Nunggak ${formatRupiah(s.currentDebt)}`;
+          } else if (s.status === "KURANG") {
+            badge = `🟠 Kurang ${formatRupiah(s.currentDebt)}`;
           } else if (s.status === "LEBIH") {
             badge = `🌟 Lebih ${formatRupiah(s.currentSurplus)}`;
           }

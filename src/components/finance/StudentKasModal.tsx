@@ -121,7 +121,7 @@ export default function StudentKasModal({
                 )}
                 {student.currentDebt > 0 && (
                   <span className="text-xs text-danger font-medium">
-                    • Menunggak {student.unpaidMeetingsCount} pertemuan
+                    • {student.statusText.includes("Kurang") ? "Kurang" : "Menunggak"} {student.unpaidMeetingsCount} pertemuan
                   </span>
                 )}
               </div>
@@ -315,6 +315,9 @@ export default function StudentKasModal({
                     )}
                     {m.status === "MENUNGGAK" && (
                       <AlertTriangle className="h-3.5 w-3.5 text-danger shrink-0" />
+                    )}
+                    {m.status === "KURANG" && (
+                      <AlertTriangle className="h-3.5 w-3.5 text-amber-500 shrink-0" />
                     )}
                     <span>{m.explanation}</span>
                   </p>
