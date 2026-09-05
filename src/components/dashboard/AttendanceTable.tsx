@@ -135,6 +135,7 @@ export default memo(function AttendanceTable({
                     <td>
                       <button
                         onClick={() => onStudentDetail(r.nama)}
+                        title={r.nama}
                         className="font-medium uppercase text-foreground underline decoration-accent/40 decoration-dashed underline-offset-2 hover:text-accent hover:decoration-accent"
                       >
                         {r.nama}
