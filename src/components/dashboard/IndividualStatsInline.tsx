@@ -192,6 +192,7 @@ export default function IndividualStatsInline({
                 <td className="sticky left-10 z-10 bg-surface">
                   <button
                     onClick={() => onStudentDetail(s.nama)}
+                    title={s.nama}
                     className="flex items-center gap-1.5 font-medium uppercase text-foreground hover:text-accent hover:underline"
                   >
                     <User className="h-3 w-3 text-muted" />

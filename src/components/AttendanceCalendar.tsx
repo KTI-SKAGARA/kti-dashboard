@@ -450,7 +450,7 @@ export default function AttendanceCalendar({
                     {selectedRecords.map((r, i) => (
                       <tr key={`${r._gen}-${r.nama}-${r._rowId}`}>
                         <td className="text-muted tabular-nums">{i + 1}</td>
-                        <td className="font-medium uppercase text-foreground">
+                        <td title={r.nama} className="max-w-[200px] truncate font-medium uppercase text-foreground">
                           {r.nama}
                         </td>
                         <td className="text-muted">{r.kelas}</td>

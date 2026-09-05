@@ -1222,7 +1222,7 @@ export default function InputPage() {
                         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
                           {/* Nama & Kelas & Saldo */}
                           <div className="flex items-center gap-2 min-w-0 flex-wrap">
-                            <span className="font-bold text-sm uppercase text-foreground truncate">
+                            <span title={s.nama} className="font-bold text-sm uppercase text-foreground truncate">
                               {s.nama}
                             </span>
                             <span className="badge bg-surface-2 text-muted text-[10px] font-semibold shrink-0">

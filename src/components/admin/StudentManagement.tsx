@@ -318,7 +318,7 @@ export default function StudentManagement({ gens, showToast }: StudentManagement
               {filteredProfiles.map((p, i) => (
                 <tr key={`${p.gen}-${p.nama}`}>
                   <td className="text-muted tabular-nums">{i + 1}</td>
-                  <td className="font-medium uppercase text-foreground">{p.nama}</td>
+                  <td title={p.nama} className="max-w-[200px] truncate font-medium uppercase text-foreground">{p.nama}</td>
                   <td>
                     <span className={`badge font-bold text-[10px] ${getGenBadgeColor(p.gen)}`}>
                       {p.gen}
