@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { loginAdmin } from "@/app/actions/auth";
 import {
   Mail,
@@ -16,18 +16,17 @@ export default function LoginPage() {
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [submitting, setSubmitting] = useState(false);
-  const [error, setError] = useState("");
-
-  useEffect(() => {
+  const [error, setError] = useState(() => {
+    if (typeof window === "undefined") return "";
     const params = new URLSearchParams(window.location.search);
     if (params.get("err") === "config") {
-      setError(
-        "Konfigurasi server belum lengkap (Supabase belum di-set). Hubungi admin."
-      );
-    } else if (params.get("err") === "inactive") {
-      setError("Akun tidak aktif. Hubungi admin untuk mengaktifkan akun Anda.");
+      return "Konfigurasi server belum lengkap (Supabase belum di-set). Hubungi admin.";
     }
-  }, []);
+    if (params.get("err") === "inactive") {
+      return "Akun tidak aktif. Hubungi admin untuk mengaktifkan akun Anda.";
+    }
+    return "";
+  });
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();

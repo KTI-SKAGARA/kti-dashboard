@@ -53,6 +53,8 @@ export interface MonthlyReport {
   balance: number;
   expenseBreakdown: { category: string; nominal: number }[];
   attendanceCount: number;
+  expenseItems?: { tanggal: string; deskripsi: string; category: string; nominal: number }[];
+  incomeByGen?: { gen: string; total: number }[];
 }
 
 export interface KasPayment {

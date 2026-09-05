@@ -1,8 +1,10 @@
 "use client";
 
+import { useState } from "react";
 import { Printer, TrendingUp, TrendingDown, Wallet, Users } from "lucide-react";
 import type { MonthlyReport } from "@/types/finance";
 import { formatRupiah } from "@/lib/utils";
+import PrintLPJModal from "./PrintLPJModal";
 
 interface Props {
   report: MonthlyReport | null;
@@ -10,6 +12,8 @@ interface Props {
 }
 
 export default function MonthlyReportView({ report, loading }: Props) {
+  const [showPrintModal, setShowPrintModal] = useState<boolean>(false);
+
   if (loading) {
     return (
       <div className="flex items-center justify-center py-10">
@@ -24,54 +28,24 @@ export default function MonthlyReportView({ report, loading }: Props) {
     );
   }
 
-  const handlePrint = () => {
-    const content = document.getElementById("printable-report");
-    if (!content) return;
-    const win = window.open("", "_blank");
-    if (!win) return;
-    win.document.write(`
-      <html><head><title>Laporan Keuangan ${report.bulan_tahun}</title>
-      <style>
-        body { font-family: Arial, sans-serif; padding: 20px; font-size: 12px; }
-        table { width: 100%; border-collapse: collapse; margin-top: 10px; }
-        th, td { border: 1px solid #ddd; padding: 6px 8px; text-align: left; }
-        th { background: #f5f5f5; }
-        .text-right { text-align: right; }
-        .font-bold { font-weight: bold; }
-        h1 { font-size: 16px; }
-        h2 { font-size: 14px; margin-top: 20px; }
-      </style></head><body>
-        <h1>KTI Dashboard — Laporan Keuangan</h1>
-        <p>Bulan: ${report.bulan_tahun}</p>
-        <table>
-          <tr><td>Total Pemasukan</td><td class="text-right font-bold">${formatRupiah(report.income)}</td></tr>
-          <tr><td>Total Pengeluaran</td><td class="text-right font-bold">${formatRupiah(report.expenses)}</td></tr>
-          <tr><td>Saldo</td><td class="text-right font-bold">${formatRupiah(report.balance)}</td></tr>
-          <tr><td>Jumlah Presensi</td><td class="text-right">${report.attendanceCount} orang</td></tr>
-        </table>
-        ${report.expenseBreakdown.length > 0 ? `
-          <h2>Breakdown Pengeluaran</h2>
-          <table>
-            <tr><th>Kategori</th><th class="text-right">Nominal</th></tr>
-            ${report.expenseBreakdown.map((e) => `
-              <tr><td>${e.category}</td><td class="text-right">${formatRupiah(e.nominal)}</td></tr>
-            `).join("")}
-          </table>
-        ` : ""}
-      </body></html>
-    `);
-    win.document.close();
-    win.print();
-  };
-
   return (
     <div className="space-y-4">
       <div className="flex justify-end">
-        <button onClick={handlePrint} className="btn btn-outline min-h-[44px]">
+        <button
+          onClick={() => setShowPrintModal(true)}
+          className="btn btn-outline min-h-[44px] flex items-center gap-2 border-border hover:bg-surface-2"
+        >
           <Printer className="h-4 w-4" />
-          <span>Cetak / Export PDF</span>
+          <span>Cetak Dokumen Resmi (LPJ)</span>
         </button>
       </div>
+
+      {/* Print LPJ Modal */}
+      <PrintLPJModal
+        open={showPrintModal}
+        onClose={() => setShowPrintModal(false)}
+        report={report}
+      />
 
       <div id="printable-report" className="space-y-4">
         {/* Summary cards */}

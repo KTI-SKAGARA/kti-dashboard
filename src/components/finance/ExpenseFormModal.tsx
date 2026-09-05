@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { X, Loader2 } from "lucide-react";
 import type { Expense, ExpenseCategory } from "@/types/finance";
 import { getTodayFormatted, getBulanTahunFromDate } from "@/lib/utils";
@@ -20,37 +20,28 @@ interface Props {
   onClose: () => void;
 }
 
-export default function ExpenseFormModal({
-  open,
+interface InnerProps {
+  expense?: Expense | null;
+  categories: ExpenseCategory[];
+  loading: boolean;
+  onSubmit: Props["onSubmit"];
+  onClose: () => void;
+}
+
+function ExpenseFormInner({
   expense,
   categories,
   loading,
   onSubmit,
   onClose,
-}: Props) {
-  const [deskripsi, setDeskripsi] = useState("");
-  const [nominal, setNominal] = useState("");
-  const [categoryId, setCategoryId] = useState("");
-  const [tanggal, setTanggal] = useState("");
+}: InnerProps) {
+  const [deskripsi, setDeskripsi] = useState(expense?.deskripsi || "");
+  const [nominal, setNominal] = useState(expense?.nominal ? String(expense.nominal) : "");
+  const [categoryId, setCategoryId] = useState(
+    expense?.category_id || categories[0]?.id || ""
+  );
+  const [tanggal, setTanggal] = useState(expense?.tanggal || getTodayFormatted());
   const [submitting, setSubmitting] = useState(false);
-
-  useEffect(() => {
-    if (open) {
-      if (expense) {
-        setDeskripsi(expense.deskripsi);
-        setNominal(String(expense.nominal));
-        setCategoryId(expense.category_id);
-        setTanggal(expense.tanggal);
-      } else {
-        setDeskripsi("");
-        setNominal("");
-        setCategoryId(categories[0]?.id || "");
-        setTanggal(getTodayFormatted());
-      }
-    }
-  }, [open, expense, categories]);
-
-  if (!open) return null;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -155,6 +146,30 @@ export default function ExpenseFormModal({
           </div>
         </form>
       </div>
+    </div>
+  );
+}
+
+export default function ExpenseFormModal({
+  open,
+  expense,
+  categories,
+  loading,
+  onSubmit,
+  onClose,
+}: Props) {
+  if (!open) return null;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+      <ExpenseFormInner
+        key={expense?.id || "new"}
+        expense={expense}
+        categories={categories}
+        loading={loading}
+        onSubmit={onSubmit}
+        onClose={onClose}
+      />
     </div>
   );
 }

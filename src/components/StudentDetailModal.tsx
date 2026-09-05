@@ -3,6 +3,7 @@
 import { X, User, BookOpen, Coins, TrendingUp } from "lucide-react";
 import { formatRupiah } from "@/lib/utils";
 import type { TaggedRecord, StatusAbsen } from "@/types/attendance";
+import { calculateStudentKas } from "@/lib/kas-allocation";
 
 interface StudentDetailModalProps {
   nama: string;
@@ -23,6 +24,7 @@ export default function StudentDetailModal({
       return by !== ay ? by - ay : bm !== am ? bm - am : bd - ad;
     });
 
+  const kasSummary = calculateStudentKas(studentRecords);
   const first = studentRecords[0];
   const total = studentRecords.length;
   const hadir = studentRecords.filter((r) => r.statusAbsen === "Hadir").length;
@@ -42,8 +44,11 @@ export default function StudentDetailModal({
       : "bg-danger/15 text-danger";
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-foreground/50 p-4">
-      <div className="card flex max-h-[85vh] w-full max-w-lg flex-col p-6 shadow-lg">
+    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/60 p-0 sm:p-4 backdrop-blur-md animate-fade-in">
+      <div className="card flex max-h-[92vh] sm:max-h-[85vh] w-full max-w-lg flex-col rounded-t-3xl sm:rounded-2xl p-5 sm:p-6 shadow-2xl pb-8 sm:pb-6 overflow-hidden">
+        {/* Mobile Drag Indicator Pill */}
+        <div className="mx-auto mb-2 h-1.5 w-12 rounded-full bg-border sm:hidden" />
+
         {/* Header */}
         <div className="flex items-start justify-between gap-3">
           <div className="flex items-start gap-3">
@@ -69,29 +74,50 @@ export default function StudentDetailModal({
 
         {/* Stats */}
         <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
-          {[
-            { icon: BookOpen, label: "Pertemuan", value: String(total) },
-            { icon: TrendingUp, label: "Kehadiran", value: `${rate}%` },
-            { icon: Coins, label: "Total Kas", value: formatRupiah(kas) },
-          ].map((s) => (
-            <div
-              key={s.label}
-              className="rounded-lg border-2 border-border bg-surface-2 p-2.5"
-            >
-              <div className="flex items-center gap-1.5">
-                <s.icon className="h-3.5 w-3.5 text-muted" />
-                <p className="text-[10px] font-bold uppercase tracking-wide text-muted">
-                  {s.label}
-                </p>
-              </div>
-              <p className="mt-1 text-sm font-extrabold text-foreground tabular-nums">
-                {s.value}
+          <div className="rounded-lg border-2 border-border bg-surface-2 p-2.5">
+            <div className="flex items-center gap-1.5">
+              <BookOpen className="h-3.5 w-3.5 text-muted" />
+              <p className="text-[10px] font-bold uppercase tracking-wide text-muted">
+                Pertemuan
               </p>
             </div>
-          ))}
+            <p className="mt-1 text-sm font-extrabold text-foreground tabular-nums">
+              {total}
+            </p>
+          </div>
+
+          <div className="rounded-lg border-2 border-border bg-surface-2 p-2.5">
+            <div className="flex items-center gap-1.5">
+              <TrendingUp className="h-3.5 w-3.5 text-muted" />
+              <p className="text-[10px] font-bold uppercase tracking-wide text-muted">
+                Kehadiran
+              </p>
+            </div>
+            <p className="mt-1 text-sm font-extrabold text-foreground tabular-nums">
+              {rate}%
+            </p>
+          </div>
+
+          <div className="rounded-lg border-2 border-border bg-surface-2 p-2.5">
+            <div className="flex items-center gap-1.5">
+              <Coins className="h-3.5 w-3.5 text-muted" />
+              <p className="text-[10px] font-bold uppercase tracking-wide text-muted">
+                Kas & Status
+              </p>
+            </div>
+            <div className="mt-1 flex flex-col items-start gap-1">
+              <span className="text-sm font-extrabold text-foreground tabular-nums">
+                {formatRupiah(kas)}
+              </span>
+              <span className={`badge border text-[9px] font-bold px-1.5 py-0.5 ${kasSummary.statusBadge}`}>
+                {kasSummary.statusText}
+              </span>
+            </div>
+          </div>
+
           <div className="rounded-lg border-2 border-border bg-surface-2 p-2.5">
             <p className="text-[10px] font-bold uppercase tracking-wide text-muted">
-              Status
+              Status Absen
             </p>
             <div className="mt-1.5 flex flex-wrap gap-1">
               {[
@@ -116,32 +142,49 @@ export default function StudentDetailModal({
         {/* History */}
         <div className="mt-4 flex-1 overflow-y-auto">
           <p className="mb-2 text-xs font-bold uppercase tracking-wide text-muted">
-            Riwayat Pertemuan
+            Riwayat Pertemuan & Kas
           </p>
           <table className="data-table">
             <thead>
               <tr>
                 <th>Tanggal</th>
                 <th>Kelas</th>
-                <th>Status</th>
-                <th className="text-right">Kas</th>
+                <th>Kehadiran</th>
+                <th className="text-right">Kas Masuk</th>
+                <th>Status Kas</th>
               </tr>
             </thead>
             <tbody>
-              {studentRecords.map((r, i) => (
-                <tr key={i}>
-                  <td className="whitespace-nowrap text-muted">{r.tanggal}</td>
-                  <td className="text-muted">{r.kelas}</td>
-                  <td>
-                    <span className={`badge ${badge(r.statusAbsen)}`}>
-                      {r.statusAbsen}
-                    </span>
-                  </td>
-                  <td className="text-right tabular-nums">
-                    {r.nominalKas > 0 ? formatRupiah(r.nominalKas) : "—"}
-                  </td>
-                </tr>
-              ))}
+              {studentRecords.map((r, i) => {
+                const meetingDetail = kasSummary.meetings.find((m) => m.tanggal === r.tanggal);
+
+                return (
+                  <tr key={i}>
+                    <td className="whitespace-nowrap text-muted font-mono">{r.tanggal}</td>
+                    <td className="text-muted">{r.kelas}</td>
+                    <td>
+                      <span className={`badge ${badge(r.statusAbsen)}`}>
+                        {r.statusAbsen}
+                      </span>
+                    </td>
+                    <td className="text-right tabular-nums font-mono font-semibold">
+                      {r.nominalKas > 0 ? formatRupiah(r.nominalKas) : "—"}
+                    </td>
+                    <td>
+                      {meetingDetail ? (
+                        <span
+                          className={`badge border text-[9px] font-bold ${meetingDetail.badgeClass}`}
+                          title={meetingDetail.explanation}
+                        >
+                          {meetingDetail.statusLabel}
+                        </span>
+                      ) : (
+                        "—"
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
           {studentRecords.length === 0 && (

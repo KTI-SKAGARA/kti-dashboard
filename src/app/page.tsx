@@ -36,8 +36,10 @@ import {
 import { APP_NAME, PAGE_SIZE, TOAST_DURATION } from "@/lib/constants";
 import {
   PieChart as PieChartIcon,
-  Table as TableIcon,
   PlusCircle,
+  Coins,
+  ClipboardCheck,
+  ArrowRight,
 } from "lucide-react";
 import Link from "next/link";
 import DeleteConfirmModal from "@/components/DeleteConfirmModal";
@@ -51,25 +53,33 @@ import TodayBanner from "@/components/dashboard/TodayBanner";
 import BulkDeleteModal from "@/components/dashboard/BulkDeleteModal";
 import BulkMoveModal from "@/components/dashboard/BulkMoveModal";
 import EditRecordModal from "@/components/dashboard/EditRecordModal";
-import FinanceSummaryCard from "@/components/finance/FinanceSummaryCard";
-import { getFinanceSummary } from "@/app/actions/finance";
+import KasDashboard from "@/components/finance/KasDashboard";
 
 export default function DashboardPage() {
-  const [viewMode, setViewMode] = useState<"absensi" | "rekap">("absensi");
-  const [rekapSubTab, setRekapSubTab] = useState<"ringkasan" | "siswa">("ringkasan");
+  const [viewMode, setViewMode] = useState<"kehadiran" | "kas" | "rekap">(() => {
+    if (typeof window === "undefined") return "kehadiran";
+    const tab = new URLSearchParams(window.location.search).get("tab");
+    if (tab === "kas") return "kas";
+    if (tab === "rekap") return "rekap";
+    return "kehadiran";
+  });
+  const [rekapSubTab, setRekapSubTab] = useState<"ringkasan" | "siswa">(() => {
+    if (typeof window === "undefined") return "ringkasan";
+    const sub = new URLSearchParams(window.location.search).get("sub");
+    return sub === "siswa" ? "siswa" : "ringkasan";
+  });
 
-  // Bind URL params dari redirect /stats lama (?tab=rekap&sub=siswa), lalu bersihkan URL
-  useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    if (!params.get("tab") && !params.get("sub")) return;
-    const t = setTimeout(() => {
-      if (params.get("tab") === "rekap") {
-        setViewMode("rekap");
-        if (params.get("sub") === "siswa") setRekapSubTab("siswa");
-      }
-      window.history.replaceState({}, "", window.location.pathname);
-    }, 0);
-    return () => clearTimeout(t);
+  const handleTabChange = useCallback((mode: "kehadiran" | "kas" | "rekap") => {
+    setViewMode(mode);
+    const url = new URL(window.location.href);
+    if (mode === "kehadiran") {
+      url.searchParams.delete("tab");
+      url.searchParams.delete("sub");
+    } else {
+      url.searchParams.set("tab", mode);
+      if (mode !== "rekap") url.searchParams.delete("sub");
+    }
+    window.history.replaceState({}, "", url.pathname + (url.search ? url.search : ""));
   }, []);
 
   const [genList, setGenList] = useState<GenConfig[]>([]);
@@ -124,13 +134,6 @@ export default function DashboardPage() {
   const [bulkMoveTargetGen, setBulkMoveTargetGen] = useState<Gen>("");
   const [bulkMoving, setBulkMoving] = useState(false);
 
-  // Finance summary (for dashboard card)
-  const [financeSummary, setFinanceSummary] = useState<{
-    totalIncome: number;
-    totalExpenses: number;
-    balance: number;
-  } | null>(null);
-
   const [studentDetail, setStudentDetail] = useState<string | null>(null);
 
   const [toast, setToast] = useState<{
@@ -166,26 +169,8 @@ export default function DashboardPage() {
   }, []);
 
   useEffect(() => {
-    loadGenList();
+    loadGenList(); // eslint-disable-line react-hooks/set-state-in-effect
   }, [loadGenList]);
-
-  // Finance summary for dashboard card
-  const loadFinance = useCallback(async (genList: GenConfig[]) => {
-    const gens = genList.filter((g) => g.status === "aktif").map((g) => g.gen as Gen);
-    if (gens.length === 0) return;
-    const res = await getFinanceSummary(gens);
-    if (res.success && res.data) {
-      setFinanceSummary({
-        totalIncome: res.data.totalIncome,
-        totalExpenses: res.data.totalExpenses,
-        balance: res.data.balance,
-      });
-    }
-  }, []);
-
-  useEffect(() => {
-    if (genList.length > 0) loadFinance(genList); // eslint-disable-line react-hooks/set-state-in-effect
-  }, [genList, loadFinance]);
 
   // Shared data layer: fetch + cache per Gen, dipakai lintas route (PRD §4.1)
   const gensToLoad = useMemo(
@@ -204,13 +189,13 @@ export default function DashboardPage() {
 
   // Reset page when filters change
   useEffect(() => {
-    setPage(1);
+    setPage(1); // eslint-disable-line react-hooks/set-state-in-effect
   }, [filters.gen, filters.kelas, filters.bulan, filters.tanggalFrom, filters.tanggalTo, filters.status, filters.search]);
 
   // Fetch halaman tabel dari server (filter + sort di data layer)
   useEffect(() => {
     let cancelled = false;
-    setTableLoading(true);
+    setTableLoading(true); // eslint-disable-line react-hooks/set-state-in-effect
     getAttendanceRecordsPage(
       filters.gen,
       page,
@@ -985,150 +970,252 @@ export default function DashboardPage() {
   const activeGenBadgeColor = (g: Gen) => getGenBadgeColor(g);
 
   return (
-    <div className="mx-auto max-w-5xl animate-page">
+    <div className="mx-auto max-w-5xl animate-page space-y-5">
       {/* Header */}
-      <div className="flex flex-wrap items-center justify-between gap-3 border-b-2 border-border pb-5">
+      <div className="flex flex-wrap items-center justify-between gap-4 border-b-2 border-border pb-5">
         <div>
-          <p className="text-[10px] font-bold uppercase tracking-widest text-accent">
-            {APP_NAME} — {filters.gen === "semua" ? "Semua Gen" : genLabel(filters.gen as Gen)}
-          </p>
-          <h1 className="mt-0.5 font-display text-2xl font-extrabold uppercase tracking-tight text-foreground sm:text-3xl">
-            Rekap <span className="text-accent">Absensi</span> &amp; Kas
+          <div className="flex items-center gap-2">
+            <span className="inline-flex items-center rounded-full bg-accent/10 px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-widest text-accent">
+              {APP_NAME}
+            </span>
+            <span className="text-xs font-semibold text-muted">
+              • {filters.gen === "semua" ? "Semua Generasi" : genLabel(filters.gen as Gen)}
+            </span>
+          </div>
+          <h1 className="mt-1 font-display text-2xl font-extrabold uppercase tracking-tight text-foreground sm:text-3xl">
+            {viewMode === "kehadiran" ? (
+              <>
+                Dashboard <span className="text-accent">Kehadiran</span>
+              </>
+            ) : viewMode === "kas" ? (
+              <>
+                Manajemen <span className="text-accent">Kas &amp; Alihan</span>
+              </>
+            ) : (
+              <>
+                Rekap &amp; <span className="text-accent">Statistik Kehadiran</span>
+              </>
+            )}
           </h1>
+          <p className="mt-1 text-xs text-muted">
+            {viewMode === "kehadiran"
+              ? "Catatan presensi harian siswa, status kehadiran, dan filter kelas."
+              : viewMode === "kas"
+              ? "Pembayaran kas per pertemuan, pelunasan otomatis, dan alihan saldo lebih ke minggu depan."
+              : "Ringkasan statistik kehadiran siswa, evaluasi kedisiplinan presensi, dan rekap per kelas."}
+          </p>
         </div>
-        <div className="flex items-center gap-2">
-          <div className="inline-flex items-center gap-1 rounded-xl border-2 border-border bg-surface p-1">
+
+        {/* Segmented Control Switcher & Action CTA */}
+        <div className="flex flex-wrap items-center gap-2.5">
+          {/* Double-Bezel Segmented Control */}
+          <div className="inline-flex items-center gap-1 rounded-2xl border border-border/80 bg-surface-alt/70 p-1.5 shadow-xs backdrop-blur-md">
             <button
-              onClick={() => setViewMode("absensi")}
-              className={`chip min-h-[44px] ${viewMode === "absensi" ? "chip-on" : ""}`}
+              onClick={() => handleTabChange("kehadiran")}
+              className={`inline-flex min-h-[44px] items-center gap-2 rounded-xl px-3.5 py-2 text-xs sm:text-sm font-medium transition-all duration-200 ease-[cubic-bezier(0.32,0.72,0,1)] active:scale-[0.98] ${
+                viewMode === "kehadiran"
+                  ? "bg-surface text-foreground font-semibold shadow-xs border border-border/70 ring-1 ring-border/20"
+                  : "text-muted hover:text-foreground hover:bg-surface/50"
+              }`}
             >
-              <TableIcon className="h-4 w-4" />
-              Absensi
+              <ClipboardCheck className="h-4 w-4 text-emerald-500" />
+              <span>Kehadiran</span>
             </button>
+
             <button
-              onClick={() => setViewMode("rekap")}
-              className={`chip min-h-[44px] ${viewMode === "rekap" ? "chip-on" : ""}`}
+              onClick={() => handleTabChange("kas")}
+              className={`inline-flex min-h-[44px] items-center gap-2 rounded-xl px-3.5 py-2 text-xs sm:text-sm font-medium transition-all duration-200 ease-[cubic-bezier(0.32,0.72,0,1)] active:scale-[0.98] ${
+                viewMode === "kas"
+                  ? "bg-surface text-foreground font-semibold shadow-xs border border-border/70 ring-1 ring-border/20"
+                  : "text-muted hover:text-foreground hover:bg-surface/50"
+              }`}
             >
-              <PieChartIcon className="h-4 w-4" />
-              Rekap
+              <Coins className="h-4 w-4 text-amber-500" />
+              <span>Kas Siswa</span>
+              <span className="hidden sm:inline-flex rounded-md bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-bold text-amber-600 dark:text-amber-400">
+                Alihan
+              </span>
+            </button>
+
+            <button
+              onClick={() => handleTabChange("rekap")}
+              className={`inline-flex min-h-[44px] items-center gap-2 rounded-xl px-3.5 py-2 text-xs sm:text-sm font-medium transition-all duration-200 ease-[cubic-bezier(0.32,0.72,0,1)] active:scale-[0.98] ${
+                viewMode === "rekap"
+                  ? "bg-surface text-foreground font-semibold shadow-xs border border-border/70 ring-1 ring-border/20"
+                  : "text-muted hover:text-foreground hover:bg-surface/50"
+              }`}
+            >
+              <PieChartIcon className="h-4 w-4 text-blue-500" />
+              <span>Rekap</span>
             </button>
           </div>
-          <Link href="/input" className="btn btn-primary min-h-[44px] px-3 py-2 text-sm">
+
+          <Link
+            href="/input"
+            className="inline-flex min-h-[44px] items-center gap-2 rounded-xl bg-accent px-4 py-2 text-xs sm:text-sm font-semibold text-accent-foreground shadow-xs transition-all duration-200 hover:brightness-105 active:scale-[0.98]"
+          >
             <PlusCircle className="h-4 w-4" />
-            Input Data
+            <span>Input Data</span>
           </Link>
         </div>
       </div>
 
-      {/* Hari ini banner */}
-      <TodayBanner
-        dateLabel={todayStats.dateLabel}
-        total={todayStats.total}
-        hadir={todayStats.hadir}
-        sakit={todayStats.sakit}
-        izin={todayStats.izin}
-        alfa={todayStats.alfa}
-        kas={todayStats.kas}
-        filters={filters}
-        onFilterToday={() =>
-          setFilters((f) => ({
-            ...f,
-            tanggalFrom: getTodayISO(),
-            tanggalTo: getTodayISO(),
-          }))
-        }
-      />
+      {/* VIEW 1: KEHADIRAN (Presensi) */}
+      {viewMode === "kehadiran" && (
+        <div className="space-y-4">
+          {/* Hari ini banner */}
+          <TodayBanner
+            dateLabel={todayStats.dateLabel}
+            total={todayStats.total}
+            hadir={todayStats.hadir}
+            sakit={todayStats.sakit}
+            izin={todayStats.izin}
+            alfa={todayStats.alfa}
+            kas={todayStats.kas}
+            filters={filters}
+            onFilterToday={() =>
+              setFilters((f) => ({
+                ...f,
+                tanggalFrom: getTodayISO(),
+                tanggalTo: getTodayISO(),
+              }))
+            }
+          />
 
-      {/* Finance summary */}
-      {financeSummary && (
-        <div className="mb-4">
-          <Link href="/finance" className="block hover:opacity-90">
-            <FinanceSummaryCard
-              totalIncome={financeSummary.totalIncome}
-              totalExpenses={financeSummary.totalExpenses}
-              balance={financeSummary.balance}
-            />
-          </Link>
+          {/* Filters Toolbar */}
+          <FilterBar
+            filters={filters}
+            onFiltersChange={setFilters}
+            filterOptions={filterOptions}
+            activeGens={activeGens}
+            hasActiveFilter={hasActiveFilter}
+            recordsTotal={records.length}
+            onReload={reloadAll}
+            onExport={exportToExcel}
+          />
+
+          {/* Attendance Table */}
+          <AttendanceTable
+            records={tableRecords}
+            total={tableTotal}
+            loading={tableLoading || loading}
+            page={page}
+            onPageChange={setPage}
+            hasActiveFilter={hasActiveFilter}
+            selectedKeys={selectedKeys}
+            allSelected={allSelected}
+            onToggleSelectAll={toggleSelectAll}
+            onToggleSelect={toggleSelectRecord}
+            onClearSelection={() => setSelectedKeys(new Set())}
+            onBulkDelete={() => setBulkDeleteModal(true)}
+            onBulkMove={() => {
+              setBulkMoveTargetGen(activeGens[0] || "12");
+              setBulkMoveModal(true);
+            }}
+            onEdit={openEditModal}
+            onDelete={(r) =>
+              setDeleteModal({ open: true, rowId: r._rowId, record: r })
+            }
+            onStudentDetail={setStudentDetail}
+            onFilterTanggal={(tanggal) => {
+              const iso = formatTanggalToISO(tanggal) || getTodayISO();
+              setFilters((f) => ({ ...f, tanggalFrom: iso, tanggalTo: iso }));
+            }}
+            getGenBadgeColor={activeGenBadgeColor}
+          />
         </div>
       )}
 
-      {/* Filters Toolbar */}
-      <FilterBar
-        filters={filters}
-        onFiltersChange={setFilters}
-        filterOptions={filterOptions}
-        activeGens={activeGens}
-        hasActiveFilter={hasActiveFilter}
-        recordsTotal={records.length}
-        onReload={reloadAll}
-        onExport={exportToExcel}
-      />
+      {/* VIEW 2: MANAJEMEN KAS SISWA */}
+      {viewMode === "kas" && (
+        <div className="space-y-4">
+          {/* Info banner with link to financial ledger */}
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-amber-500/20 bg-amber-500/5 p-4 text-xs">
+            <div className="flex items-center gap-2.5">
+              <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-amber-500/10 text-amber-600 dark:text-amber-400">
+                <Coins className="h-4 w-4" />
+              </span>
+              <div>
+                <p className="font-bold text-foreground">
+                  Sistem Alihan Saldo Kas Otomatis Aktif
+                </p>
+                <p className="text-muted">
+                  Pembayaran ganda atau lebih dari nominal rutin otomatis dialihkan ke minggu selanjutnya.
+                </p>
+              </div>
+            </div>
+            <Link
+              href="/finance"
+              className="inline-flex items-center gap-1.5 font-semibold text-accent hover:underline"
+            >
+              <span>Buku Kas &amp; Pengeluaran Organisasi</span>
+              <ArrowRight className="h-3.5 w-3.5" />
+            </Link>
+          </div>
 
-      {/* VIEW 1: ABSENSI (pagination + filter di server, PRD P2-6) */}
-      {viewMode === "absensi" && (
-        <AttendanceTable
-          records={tableRecords}
-          total={tableTotal}
-          loading={tableLoading || loading}
-          page={page}
-          onPageChange={setPage}
-          hasActiveFilter={hasActiveFilter}
-          selectedKeys={selectedKeys}
-          allSelected={allSelected}
-          onToggleSelectAll={toggleSelectAll}
-          onToggleSelect={toggleSelectRecord}
-          onClearSelection={() => setSelectedKeys(new Set())}
-          onBulkDelete={() => setBulkDeleteModal(true)}
-          onBulkMove={() => {
-            setBulkMoveTargetGen(activeGens[0] || "12");
-            setBulkMoveModal(true);
-          }}
-          onEdit={openEditModal}
-          onDelete={(r) =>
-            setDeleteModal({ open: true, rowId: r._rowId, record: r })
-          }
-          onStudentDetail={setStudentDetail}
-          onFilterTanggal={(tanggal) => {
-            const iso = formatTanggalToISO(tanggal) || getTodayISO();
-            setFilters((f) => ({ ...f, tanggalFrom: iso, tanggalTo: iso }));
-          }}
-          getGenBadgeColor={activeGenBadgeColor}
-        />
+          <KasDashboard
+            gens={activeGens}
+            records={allRecords}
+            loading={loading}
+            onRefresh={reloadAll}
+          />
+        </div>
       )}
 
-      {/* VIEW 2: REKAP */}
+      {/* VIEW 3: REKAP */}
       {viewMode === "rekap" && (
-        <>
-          {/* Sub-tabs: Ringkasan / Per Siswa */}
-          <div className="flex items-center gap-2">
-            <div className="inline-flex items-center gap-1 rounded-xl border-2 border-border bg-surface p-1">
+        <div className="space-y-4">
+          {/* Sub-tabs: Statistik Kehadiran / Per Siswa / Quick link to Kas */}
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="inline-flex items-center gap-1 rounded-xl border border-border/80 bg-surface-alt/70 p-1">
               <button
                 onClick={() => setRekapSubTab("ringkasan")}
                 className={`chip min-h-[44px] text-xs ${rekapSubTab === "ringkasan" ? "chip-on" : ""}`}
               >
-                Ringkasan
+                Statistik Kehadiran
               </button>
               <button
                 onClick={() => setRekapSubTab("siswa")}
                 className={`chip min-h-[44px] text-xs ${rekapSubTab === "siswa" ? "chip-on" : ""}`}
               >
-                Per Siswa
+                Performa per Siswa
               </button>
             </div>
+
+            <button
+              onClick={() => handleTabChange("kas")}
+              className="inline-flex min-h-[40px] items-center gap-2 rounded-xl border border-amber-500/30 bg-amber-500/10 px-3.5 py-1.5 text-xs font-semibold text-amber-600 dark:text-amber-400 transition-all hover:bg-amber-500/20 active:scale-95"
+            >
+              <Coins className="h-3.5 w-3.5" />
+              <span>Buka Statistik &amp; Matriks Kas →</span>
+            </button>
           </div>
 
           {rekapSubTab === "ringkasan" && (
-            <StatsView
-              stats={stats}
-              records={records}
-              filters={filters}
-              onFiltersChange={setFilters}
-              dailySummaries={dailySummaries}
-              genSummaries={genSummaries}
-              onOpenTableMode={() => setViewMode("absensi")}
-              onStudentDetail={setStudentDetail}
-              getGenBadgeColor={activeGenBadgeColor}
-            />
+            <>
+              <FilterBar
+                filters={filters}
+                onFiltersChange={setFilters}
+                filterOptions={filterOptions}
+                activeGens={activeGens}
+                hasActiveFilter={hasActiveFilter}
+                recordsTotal={records.length}
+                onReload={reloadAll}
+                onExport={exportToExcel}
+              />
+              <StatsView
+                stats={stats}
+                records={records}
+                filters={filters}
+                onFiltersChange={setFilters}
+                dailySummaries={dailySummaries}
+                genSummaries={genSummaries}
+                onOpenTableMode={() => handleTabChange("kehadiran")}
+                onOpenKasMode={() => handleTabChange("kas")}
+                onStudentDetail={setStudentDetail}
+                getGenBadgeColor={activeGenBadgeColor}
+              />
+            </>
           )}
 
           {rekapSubTab === "siswa" && (
@@ -1138,7 +1225,7 @@ export default function DashboardPage() {
               onStudentDetail={setStudentDetail}
             />
           )}
-        </>
+        </div>
       )}
 
       {/* Delete modal */}

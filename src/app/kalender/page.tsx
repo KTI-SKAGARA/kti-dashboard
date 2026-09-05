@@ -69,7 +69,7 @@ export default function KalenderPage() {
   }, []);
 
   useEffect(() => {
-    loadKegiatan();
+    loadKegiatan(); // eslint-disable-line react-hooks/set-state-in-effect
   }, [loadKegiatan]);
 
   const monthKegiatan = useMemo(() => {
@@ -180,7 +180,6 @@ export default function KalenderPage() {
 
   const fallback = JENIS_KEGIATAN_OPTIONS[5];
   const getJenisStyle = (jenis: JenisKegiatan) => jenisMap.get(jenis)?.idle ?? fallback.idle;
-  const getJenisActiveStyle = (jenis: JenisKegiatan) => jenisMap.get(jenis)?.active ?? fallback.active;
   const getJenisDot = (jenis: JenisKegiatan) => jenisMap.get(jenis)?.dot ?? fallback.dot;
   const getJenisLabel = (jenis: JenisKegiatan) => jenisMap.get(jenis)?.label ?? "Lainnya";
 

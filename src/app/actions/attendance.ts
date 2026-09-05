@@ -422,7 +422,7 @@ export async function submitBulkAttendance(
   gen: Gen,
   kelas: string,
   tanggal: string, // DD/MM/YYYY
-  entries: { nama: string; statusAbsen: StatusAbsen; nominalKas: number }[]
+  entries: { nama: string; statusAbsen: StatusAbsen; nominalKas: number; kelas?: string }[]
 ): Promise<ApiResponse<{ saved: number }>> {
   try {
     const auth = await requireAdmin();
@@ -442,7 +442,7 @@ export async function submitBulkAttendance(
     const records: AttendanceRecord[] = entries.map((e) => ({
       tanggal,
       nama: normalizeName(e.nama),
-      kelas: normalizeKelas(kelas),
+      kelas: normalizeKelas(e.kelas || (kelas === "semua" ? "Umum" : kelas)),
       statusAbsen: e.statusAbsen,
       nominalKas: e.nominalKas,
       bulanTahun,
@@ -688,3 +688,90 @@ export async function deleteGenAction(gen: Gen): Promise<ApiResponse> {
     };
   }
 }
+
+// ---------------------------------------------------------------------------
+// Kas: catat / sesuaikan pembayaran kas langsung
+// ---------------------------------------------------------------------------
+
+export async function recordDirectKasPayment(params: {
+  gen: Gen;
+  nama: string;
+  kelas: string;
+  tanggal: string; // DD/MM/YYYY
+  nominalKas: number;
+  rowId?: string;
+}): Promise<ApiResponse> {
+  try {
+    const auth = await requireAdmin();
+    if (!auth.ok) return { success: false, error: auth.error };
+
+    const { gen, nama, kelas, tanggal, nominalKas, rowId } = params;
+    if (!gen) return { success: false, error: "Gen wajib dipilih." };
+    if (!nama) return { success: false, error: "Nama siswa wajib diisi." };
+    if (!tanggal || !/^\d{2}\/\d{2}\/\d{4}$/.test(tanggal)) {
+      return { success: false, error: "Format tanggal tidak valid (DD/MM/YYYY)." };
+    }
+    if (nominalKas < 0 || isNaN(nominalKas) || !Number.isFinite(nominalKas)) {
+      return { success: false, error: "Nominal kas harus berupa angka >= 0." };
+    }
+
+    const formattedNama = normalizeName(nama);
+    const formattedKelas = normalizeKelas(kelas || "");
+    const bulanTahun = getBulanTahunFromDate(tanggal);
+
+    if (rowId) {
+      // Update record yang sudah ada
+      await updateRecord(gen, rowId, {
+        nominalKas,
+      });
+    } else {
+      // Cek apakah ada record di tanggal & nama tersebut
+      const existing = await fetchRecords(gen);
+      const matched = existing.find(
+        (r) => r.nama === formattedNama && r.tanggal === tanggal
+      );
+
+      if (matched && matched.rowId) {
+        await updateRecord(gen, matched.rowId, {
+          nominalKas,
+        });
+      } else {
+        // Buat record baru jika belum ada absensi di tanggal tersebut
+        await appendRecord(gen, {
+          tanggal,
+          nama: formattedNama,
+          kelas: formattedKelas,
+          statusAbsen: "Hadir",
+          nominalKas,
+          bulanTahun,
+        });
+      }
+    }
+
+    // Sync ke Supabase kas_payments jika tersedia
+    try {
+      const supabase = await createClient();
+      await supabase.from("kas_payments").insert({
+        nama: formattedNama,
+        gen,
+        kelas: formattedKelas,
+        bulan_tahun: bulanTahun,
+        tanggal,
+        nominal: nominalKas,
+      });
+    } catch {
+      // Fail-silent if Supabase is unavailable (Google Sheets is source of truth)
+    }
+
+    return { success: true };
+  } catch (error) {
+    return {
+      success: false,
+      error:
+        error instanceof Error
+          ? error.message
+          : "Gagal mencatat pembayaran kas.",
+    };
+  }
+}
+
