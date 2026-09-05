@@ -9,7 +9,8 @@ export type MeetingKasStatus =
   | "LUNAS" // Dibayar pas di hari yang sama
   | "LUNAS_ALIHAN" // Lunas karena ditutup oleh sisa saldo dari minggu sebelumnya
   | "BAYAR_LEBIH" // Bayar lebih di hari ini (sisa dialihkan ke minggu selanjutnya)
-  | "MENUNGGAK" // Hadir tapi uang kurang / belum bayar
+  | "MENUNGGAK" // Hadir tapi belum bayar sama sekali
+  | "KURANG" // Hadir tapi bayar kurang dari kewajiban
   | "BEBAS" // Sakit / Izin / Alfa (tidak wajib kas)
   | "BEBAS_BAYAR"; // Tidak wajib kas tapi tetap bayar (seluruhnya dialihkan ke depan)
 
@@ -200,20 +201,26 @@ export function calculateStudentKas(
           explanation = `Kewajiban ${formatRupiah(required)} dibayar lunas pas.`;
         }
       } else {
-        // totalAvailable < required -> Menunggak
+        // totalAvailable < required -> Bayar kurang atau belum bayar
         usedThisMeeting = totalAvailable;
         shortage = required - totalAvailable;
         carriedToNext = 0;
         runningSurplus = 0;
         unpaidMeetingsCount++;
 
-        status = "MENUNGGAK";
-        statusLabel = `Nunggak ${formatRupiah(shortage)}`;
-        badgeClass =
-          "bg-danger/15 text-danger border-danger/30";
         if (totalAvailable > 0) {
+          // Bayar sebagian → KURANG
+          status = "KURANG";
+          statusLabel = `Kurang ${formatRupiah(shortage)}`;
+          badgeClass =
+            "bg-amber-500/15 text-amber-600 dark:text-amber-300 border-amber-500/30";
           explanation = `Hanya terbayar ${formatRupiah(totalAvailable)} dari kewajiban ${formatRupiah(required)}. Kurang ${formatRupiah(shortage)}.`;
         } else {
+          // Belum bayar sama sekali → MENUNGGAK
+          status = "MENUNGGAK";
+          statusLabel = `Nunggak ${formatRupiah(shortage)}`;
+          badgeClass =
+            "bg-danger/15 text-danger border-danger/30";
           explanation = `Belum membayar iuran kas pertemuan ini (${formatRupiah(required)}).`;
         }
       }
@@ -274,8 +281,15 @@ export function calculateStudentKas(
 
   if (currentDebt > 0) {
     overallStatus = "MENUNGGAK";
-    statusBadge = "bg-danger/15 text-danger border-danger/30";
-    statusText = `Nunggak ${formatRupiah(currentDebt)}`;
+    // Cek apakah ada yang belum bayar sama sekali (MENUNGGAK) atau hanya kurang (KURANG)
+    const hasFullyUnpaid = meetings.some((m) => m.status === "MENUNGGAK");
+    if (hasFullyUnpaid) {
+      statusBadge = "bg-danger/15 text-danger border-danger/30";
+      statusText = `Nunggak ${formatRupiah(currentDebt)}`;
+    } else {
+      statusBadge = "bg-amber-500/15 text-amber-600 dark:text-amber-300 border-amber-500/30";
+      statusText = `Kurang ${formatRupiah(currentDebt)}`;
+    }
   } else if (currentSurplus > 0) {
     overallStatus = "LEBIH";
     statusBadge =

@@ -48,7 +48,7 @@ interface Props {
   expenseCatTotals?: Record<string, number>;
 }
 
-type StatusFilter = "semua" | "menunggak" | "lunas" | "lebih";
+type StatusFilter = "semua" | "menunggak" | "kurang" | "lunas" | "lebih";
 
 export default function KasDashboard({
   gens,
@@ -119,7 +119,8 @@ export default function KasDashboard({
     return students.filter((s) => {
       if (q && !s.nama.toUpperCase().includes(q)) return false;
       if (selectedKelas && s.kelas !== selectedKelas) return false;
-      if (statusFilter === "menunggak" && s.status !== "MENUNGGAK") return false;
+      if (statusFilter === "menunggak" && s.status !== "MENUNGGAK" && s.status !== "KURANG") return false;
+      if (statusFilter === "kurang" && s.status !== "KURANG") return false;
       if (statusFilter === "lunas" && s.status !== "LUNAS") return false;
       if (statusFilter === "lebih" && s.status !== "LEBIH") return false;
       return true;
@@ -508,9 +509,10 @@ export default function KasDashboard({
                 onChange={(e) => setStatusFilter(e.target.value as StatusFilter)}
               >
                 <option value="semua">Semua Status</option>
-                <option value="menunggak">🔴 Hanya Menunggak</option>
-                <option value="lebih">🟡 Hanya Bayar di Muka (Lebih)</option>
-                <option value="lunas">🟢 Hanya Lunas</option>
+                <option value="menunggak">🔴 Menunggak (Belum Bayar)</option>
+                <option value="kurang">🟠 Kurang (Bayar Sebagian)</option>
+                <option value="lebih">🟡 Bayar di Muka (Lebih)</option>
+                <option value="lunas">🟢 Lunas</option>
               </select>
             </div>
 
@@ -554,6 +556,9 @@ export default function KasDashboard({
               </span>
               <span className="inline-flex items-center gap-1 rounded-md bg-amber-500/10 px-1.5 py-0.5 text-amber-600 dark:text-amber-400 border border-amber-500/20">
                 <span className="h-1.5 w-1.5 rounded-full bg-amber-500" /> Lebih
+              </span>
+              <span className="inline-flex items-center gap-1 rounded-md bg-amber-500/10 px-1.5 py-0.5 text-amber-600 dark:text-amber-400 border border-amber-500/20">
+                <span className="h-1.5 w-1.5 rounded-full bg-amber-400" /> Kurang
               </span>
               <span className="inline-flex items-center gap-1 rounded-md bg-danger/10 px-1.5 py-0.5 text-danger border border-danger/20">
                 <span className="h-1.5 w-1.5 rounded-full bg-danger" /> Nunggak
@@ -796,7 +801,12 @@ export default function KasDashboard({
                           } else if (m.status === "MENUNGGAK") {
                             cellClass =
                               "bg-rose-500/10 text-rose-700 dark:text-rose-400 border-rose-500/25 ring-1 ring-rose-500/10 font-bold";
-                            cellText = `❌ Kurang`;
+                            cellText = `❌ Nunggak`;
+                            subText = formatRupiah(m.shortage);
+                          } else if (m.status === "KURANG") {
+                            cellClass =
+                              "bg-amber-500/10 text-amber-700 dark:text-amber-400 border-amber-500/25 ring-1 ring-amber-500/10";
+                            cellText = `🟠 Kurang`;
                             subText = formatRupiah(m.shortage);
                           } else if (m.status === "BEBAS_BAYAR") {
                             cellClass =
