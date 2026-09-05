@@ -521,14 +521,19 @@ export async function getMonthlyReport(
     // Income for this month from kas_payments (hanya active gens)
     const { data: kasRows } = await supabase
       .from("kas_payments")
-      .select("nominal")
+      .select("gen, nominal")
       .eq("bulan_tahun", bulanTahun)
       .in("gen", activeGenStrings);
 
     let income = 0;
+    const genIncomeMap = new Map<string, number>();
     for (const r of kasRows || []) {
-      income += Number(r.nominal) || 0;
+      const g = String(r.gen);
+      const nom = Number(r.nominal) || 0;
+      income += nom;
+      genIncomeMap.set(g, (genIncomeMap.get(g) || 0) + nom);
     }
+    const incomeByGen = Array.from(genIncomeMap.entries()).map(([gen, total]) => ({ gen, total }));
 
     // Presensi: hitung unique orang dari attendance records (bukan dari kas_payments)
     const uniqueNames = new Set<string>();
@@ -543,24 +548,27 @@ export async function getMonthlyReport(
     }
     const attendanceCount = uniqueNames.size;
 
-    // Expenses for this month
+    // Expenses for this month with item details
     const { data: expenseRows } = await supabase
       .from("expenses")
-      .select("nominal, expense_categories(nama)")
+      .select("tanggal, deskripsi, nominal, expense_categories(nama)")
       .eq("bulan_tahun", bulanTahun)
-      .eq("status", "disetujui");
+      .eq("status", "disetujui")
+      .order("tanggal", { ascending: true });
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const expenses = (expenseRows || []).map((r: any) => ({
-      nominal: Number(r.nominal),
+    const expenseItems = (expenseRows || []).map((r: any) => ({
+      tanggal: String(r.tanggal || ""),
+      deskripsi: String(r.deskripsi || ""),
+      nominal: Number(r.nominal) || 0,
       category: (r.expense_categories?.nama as string) || "Lainnya",
     }));
 
-    const totalExpenses = expenses.reduce((sum, e) => sum + e.nominal, 0);
+    const totalExpenses = expenseItems.reduce((sum, e) => sum + e.nominal, 0);
 
     // Expense breakdown by category
     const catMap = new Map<string, number>();
-    for (const e of expenses) {
+    for (const e of expenseItems) {
       catMap.set(e.category, (catMap.get(e.category) || 0) + e.nominal);
     }
     const expenseBreakdown = Array.from(catMap.entries()).map(([category, nominal]) => ({
@@ -577,6 +585,8 @@ export async function getMonthlyReport(
         balance: income - totalExpenses,
         expenseBreakdown,
         attendanceCount,
+        expenseItems,
+        incomeByGen,
       },
     };
   } catch (error) {

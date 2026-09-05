@@ -40,10 +40,15 @@ import {
   User,
   ListChecks,
   PenLine,
-  GripVertical,
+  Sparkles,
+  Plus,
+  UserPlus,
+  Check,
 } from "lucide-react";
 import Link from "next/link";
 import Toast from "@/components/Toast";
+import { useAttendanceData } from "@/hooks/useAttendanceData";
+import { calculateStudentKas } from "@/lib/kas-allocation";
 
 type InputMode = "normal" | "cepat";
 
@@ -115,8 +120,9 @@ export default function InputPage() {
   // Quick mode state
   const [statusMap, setStatusMap] = useState<Record<string, StatusAbsen>>({});
   const [kasMap, setKasMap] = useState<Record<string, number>>({});
-  const [pickedStatus, setPickedStatus] = useState<StatusAbsen | null>(null);
-  const [dragOverNama, setDragOverNama] = useState<string | null>(null);
+  const [quickNewNama, setQuickNewNama] = useState("");
+  const [quickNewKelas, setQuickNewKelas] = useState("");
+  const [showAddForm, setShowAddForm] = useState(false);
 
   // Active gens only (for dropdown & buttons)
   const activeGens = useMemo(
@@ -178,13 +184,60 @@ export default function InputPage() {
     }
   }, []);
 
-  useEffect(() => {
-    if (gen) loadGenData(gen); // eslint-disable-line react-hooks/set-state-in-effect
-  }, [gen, loadGenData]);
+  const { loadGen, getRecords } = useAttendanceData();
 
-  // Students for selected class (quick mode)
+  useEffect(() => {
+    if (gen) {
+      loadGenData(gen); // eslint-disable-line react-hooks/set-state-in-effect
+      loadGen(gen);
+    }
+  }, [gen, loadGenData, loadGen]);
+
+  // Hitung saldo lebih (surplus alihan) per siswa di Gen aktif
+  const studentSurplusMap = useMemo(() => {
+    if (!gen) return new Map<string, number>();
+    const genRecords = getRecords(gen) || [];
+    const map = new Map<string, number>();
+
+    const studentGroups = new Map<string, import("@/types/attendance").TaggedRecord[]>();
+    for (const r of genRecords) {
+      if (!r.nama) continue;
+      const list = studentGroups.get(r.nama) || [];
+      list.push({ ...r, _gen: gen, _rowId: r.rowId || "" });
+      studentGroups.set(r.nama, list);
+    }
+
+    for (const [sNama, sRecords] of studentGroups) {
+      const summary = calculateStudentKas(sRecords);
+      if (summary.currentSurplus > 0) {
+        map.set(sNama, summary.currentSurplus);
+      }
+    }
+
+    return map;
+  }, [gen, getRecords]);
+
+  // Hitung jumlah siswa per kelas di Gen aktif
+  const classStudentCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const s of existingStudents) {
+      if (s.kelas) {
+        counts.set(s.kelas, (counts.get(s.kelas) || 0) + 1);
+      }
+    }
+    return counts;
+  }, [existingStudents]);
+
+  const classesWithStudents = useMemo(() => {
+    return Array.from(classStudentCounts.keys()).sort((a, b) => a.localeCompare(b, "id"));
+  }, [classStudentCounts]);
+
+  // Students for selected class (quick mode) — mendukung "semua" untuk tampilkan seluruh siswa Gen ini
   const studentsForKelas = useMemo(() => {
     if (!kelas) return [];
+    if (kelas === "semua") {
+      return [...existingStudents].sort((a, b) => a.nama.localeCompare(b.nama, "id"));
+    }
     return existingStudents
       .filter((s) => s.kelas === kelas)
       .sort((a, b) => a.nama.localeCompare(b.nama, "id"));
@@ -192,13 +245,17 @@ export default function InputPage() {
 
   const quickStudents: QuickStudent[] = useMemo(() => {
     if (mode !== "cepat" || !kelas) return [];
-    return studentsForKelas.map((s) => ({
-      nama: s.nama,
-      kelas: s.kelas,
-      status: statusMap[s.nama] ?? null,
-      nominalKas: kasMap[s.nama] ?? KAS_RUTIN_DEFAULT,
-    }));
-  }, [mode, kelas, studentsForKelas, statusMap, kasMap]);
+    return studentsForKelas.map((s) => {
+      const surplus = studentSurplusMap.get(s.nama) || 0;
+      const defaultKas = Math.max(0, KAS_RUTIN_DEFAULT - surplus);
+      return {
+        nama: s.nama,
+        kelas: s.kelas,
+        status: statusMap[s.nama] ?? null,
+        nominalKas: kasMap[s.nama] ?? defaultKas,
+      };
+    });
+  }, [mode, kelas, studentsForKelas, statusMap, kasMap, studentSurplusMap]);
 
   // Kas rules (normal mode)
   const kasRules = useMemo(() => {
@@ -220,7 +277,7 @@ export default function InputPage() {
       if (s.status) {
         counts[s.status.toLowerCase() as keyof typeof counts] += 1;
         counts.terisi += 1;
-        if (s.status === "Hadir") totalKas += s.nominalKas;
+        if (s.status !== "Alfa") totalKas += (s.nominalKas || 0);
       }
     }
     return {
@@ -242,12 +299,16 @@ export default function InputPage() {
   // Handlers for normal mode
   const handleStatusChange = (newStatus: StatusAbsen) => {
     setStatusAbsen(newStatus);
+    const surplus = studentSurplusMap.get(normalizeName(nama)) || 0;
     if (newStatus === "Hadir") {
-      setBayarKas(true);
-      setNominalKas(`${KAS_RUTIN_DEFAULT}`);
-    } else if (newStatus === "Alfa") {
-      setBayarKas(false);
-      setNominalKas("0");
+      const needed = Math.max(0, KAS_RUTIN_DEFAULT - surplus);
+      if (needed === 0) {
+        setBayarKas(false);
+        setNominalKas("0");
+      } else {
+        setBayarKas(true);
+        setNominalKas(`${needed}`);
+      }
     } else {
       setBayarKas(false);
       setNominalKas("0");
@@ -257,7 +318,9 @@ export default function InputPage() {
   const handleBayarKasToggle = (checked: boolean) => {
     setBayarKas(checked);
     if (checked) {
-      setNominalKas(`${KAS_RUTIN_DEFAULT}`);
+      const surplus = studentSurplusMap.get(normalizeName(nama)) || 0;
+      const needed = Math.max(0, KAS_RUTIN_DEFAULT - surplus);
+      setNominalKas(`${needed > 0 ? needed : KAS_RUTIN_DEFAULT}`);
     } else {
       setNominalKas("0");
     }
@@ -267,6 +330,15 @@ export default function InputPage() {
     setNama(student.nama);
     if (student.kelas) {
       setKelas(student.kelas);
+    }
+    const surplus = studentSurplusMap.get(student.nama) || 0;
+    const needed = Math.max(0, KAS_RUTIN_DEFAULT - surplus);
+    if (needed === 0) {
+      setBayarKas(false);
+      setNominalKas("0");
+    } else {
+      setBayarKas(true);
+      setNominalKas(`${needed}`);
     }
     setShowSuggestions(false);
     if (errors.nama) setErrors((prev) => ({ ...prev, nama: "" }));
@@ -278,14 +350,23 @@ export default function InputPage() {
     if (errors.kelas) setErrors((prev) => ({ ...prev, kelas: "" }));
     setStatusMap({});
     setKasMap({});
-    setPickedStatus(null);
   };
 
   // Quick mode handlers
   const applyStatus = (studentNama: string, st: StatusAbsen) => {
     setStatusMap((prev) => ({ ...prev, [studentNama]: st }));
-    if (st !== "Hadir") {
+    if (st === "Alfa") {
       setKasMap((prev) => ({ ...prev, [studentNama]: 0 }));
+    } else if (st === "Hadir") {
+      const surplus = studentSurplusMap.get(studentNama) || 0;
+      const needed = Math.max(0, KAS_RUTIN_DEFAULT - surplus);
+      setKasMap((prev) => ({
+        ...prev,
+        [studentNama]:
+          prev[studentNama] !== undefined && prev[studentNama] > 0
+            ? prev[studentNama]
+            : needed,
+      }));
     }
   };
 
@@ -302,15 +383,44 @@ export default function InputPage() {
     });
   };
 
-  // Tap row: status ter-pick diterapkan; tanpa pick = toggle Hadir
-  const handleRowTap = (studentNama: string) => {
-    if (pickedStatus) {
-      applyStatus(studentNama, pickedStatus);
-    } else if (statusMap[studentNama]) {
+  const handleStatusClick = (studentNama: string, st: StatusAbsen) => {
+    if (statusMap[studentNama] === st) {
       clearStudentStatus(studentNama);
     } else {
-      applyStatus(studentNama, "Hadir");
+      applyStatus(studentNama, st);
     }
+  };
+
+  const handleAddQuickStudent = (e: React.FormEvent) => {
+    e.preventDefault();
+    const cleanName = normalizeName(quickNewNama.trim());
+    if (!cleanName) return;
+
+    const assignedKelas =
+      kelas !== "semua"
+        ? kelas
+        : quickNewKelas.trim() || (classesWithStudents[0] || "Umum");
+
+    if (existingStudents.some((s) => s.nama === cleanName)) {
+      setToast({
+        type: "error",
+        message: `Siswa "${cleanName}" sudah terdaftar di daftar absensi.`,
+      });
+      setTimeout(() => setToast(null), 3000);
+      return;
+    }
+
+    const newStudent: StudentOption = { nama: cleanName, kelas: assignedKelas };
+    setExistingStudents((prev) => [...prev, newStudent]);
+    applyStatus(cleanName, "Hadir");
+    setQuickNewNama("");
+    setQuickNewKelas("");
+    setShowAddForm(false);
+    setToast({
+      type: "success",
+      message: `${cleanName} (${assignedKelas}) berhasil ditambahkan & ditandai Hadir!`,
+    });
+    setTimeout(() => setToast(null), 3000);
   };
 
   const setStudentKas = (studentNama: string, amount: number) => {
@@ -318,37 +428,39 @@ export default function InputPage() {
       ...prev,
       [studentNama]: amount,
     }));
+    // Jika siswa belum punya status kehadiran dan nominal kas > 0, otomatis tandai Hadir
+    if (!statusMap[studentNama] && amount > 0) {
+      setStatusMap((prev) => ({ ...prev, [studentNama]: "Hadir" }));
+    }
+  };
+
+  const setAllStudentsKas = (amount: number) => {
+    const kas: Record<string, number> = {};
+    for (const s of studentsForKelas) {
+      kas[s.nama] = amount;
+    }
+    setKasMap((prev) => ({ ...prev, ...kas }));
   };
 
   const toggleAllStudents = (st: StatusAbsen | null) => {
     if (st) {
       const next: Record<string, StatusAbsen> = {};
-      for (const s of studentsForKelas) next[s.nama] = st;
-      setStatusMap(next);
-      if (st !== "Hadir") {
-        const kas: Record<string, number> = {};
-        for (const s of studentsForKelas) kas[s.nama] = 0;
-        setKasMap(kas);
+      const kas: Record<string, number> = {};
+      for (const s of studentsForKelas) {
+        next[s.nama] = st;
+        if (st === "Hadir") {
+          const surplus = studentSurplusMap.get(s.nama) || 0;
+          kas[s.nama] = Math.max(0, KAS_RUTIN_DEFAULT - surplus);
+        } else {
+          kas[s.nama] = 0;
+        }
       }
+      setStatusMap(next);
+      setKasMap(kas);
     } else {
       setStatusMap({});
       setKasMap({});
     }
-  };
-
-  // Drag & drop: chip status di-drag ke baris siswa (desktop)
-  const handleStatusDragStart = (e: React.DragEvent, st: StatusAbsen) => {
-    e.dataTransfer.setData("text/plain", st);
-    e.dataTransfer.effectAllowed = "copy";
-    setPickedStatus(st);
-  };
-
-  const handleRowDrop = (e: React.DragEvent, studentNama: string) => {
-    e.preventDefault();
-    const st = (e.dataTransfer.getData("text/plain") ||
-      pickedStatus) as StatusAbsen;
-    if (st) applyStatus(studentNama, st);
-    setDragOverNama(null);
   };
 
   // Validation & Submit for normal mode
@@ -429,7 +541,8 @@ export default function InputPage() {
       marked.map((s) => ({
         nama: s.nama,
         statusAbsen: s.status as StatusAbsen,
-        nominalKas: s.status === "Hadir" ? s.nominalKas : 0,
+        nominalKas: s.status === "Alfa" ? 0 : (s.nominalKas || 0),
+        kelas: s.kelas,
       }))
     );
 
@@ -443,7 +556,6 @@ export default function InputPage() {
       });
       setStatusMap({});
       setKasMap({});
-      setPickedStatus(null);
       loadGenData(gen);
     } else {
       setToast({
@@ -457,7 +569,7 @@ export default function InputPage() {
 
   const resetForm = () => {
     setGen(activeGens[0] ?? "");
-    setKelas("");
+    setKelas(mode === "cepat" ? "semua" : "");
     setNama("");
     setTanggal(getTodayISO());
     setStatusAbsen("Hadir");
@@ -465,18 +577,39 @@ export default function InputPage() {
     setNominalKas(`${KAS_RUTIN_DEFAULT}`);
     setStatusMap({});
     setKasMap({});
-    setPickedStatus(null);
+    setQuickNewNama("");
+    setQuickNewKelas("");
+    setShowAddForm(false);
     setErrors({});
     setToast(null);
   };
 
   const handleGenChange = (newGen: Gen) => {
     setGen(newGen);
-    setKelas("");
     setNama("");
     setStatusMap({});
     setKasMap({});
-    setPickedStatus(null);
+    setQuickNewNama("");
+    setQuickNewKelas("");
+    setShowAddForm(false);
+    if (mode === "cepat") {
+      setKelas("semua");
+    } else {
+      setKelas("");
+    }
+  };
+
+  const handleModeSwitch = (newMode: InputMode) => {
+    setMode(newMode);
+    if (newMode === "cepat") {
+      if (!kelas) {
+        setKelas("semua");
+      }
+    } else {
+      if (kelas === "semua") {
+        setKelas("");
+      }
+    }
   };
 
   return (
@@ -505,14 +638,14 @@ export default function InputPage() {
       {/* Mode Toggle */}
       <div className="mt-5 inline-flex items-center gap-1 rounded-xl border-2 border-border bg-surface p-1">
         <button
-          onClick={() => setMode("normal")}
+          onClick={() => handleModeSwitch("normal")}
           className={`chip min-h-[44px] flex-1 ${mode === "normal" ? "chip-on" : ""}`}
         >
           <PenLine className="h-4 w-4" />
           Input Manual
         </button>
         <button
-          onClick={() => setMode("cepat")}
+          onClick={() => handleModeSwitch("cepat")}
           className={`chip min-h-[44px] flex-1 ${mode === "cepat" ? "chip-on" : ""}`}
         >
           <ListChecks className="h-4 w-4" />
@@ -580,13 +713,30 @@ export default function InputPage() {
               value={kelas}
               onChange={(e) => handleKelasChange(e.target.value)}
             >
-              <option value="">-- Pilih Kelas --</option>
+              {mode === "cepat" ? (
+                <option value="semua">
+                  🌟 Semua Siswa di Gen {gen} ({existingStudents.length} siswa)
+                </option>
+              ) : (
+                <option value="">-- Pilih Kelas --</option>
+              )}
+
+              {classesWithStudents.length > 0 && (
+                <optgroup label="⭐ Kelas yang Ada Anggotanya (Gen ini)">
+                  {classesWithStudents.map((k) => (
+                    <option key={k} value={k}>
+                      {k} ({classStudentCounts.get(k)} siswa terdaftar)
+                    </option>
+                  ))}
+                </optgroup>
+              )}
+
               <optgroup label="Kelas X (Sepuluh)">
                 {availableClasses
                   .filter((k) => k.startsWith("X "))
                   .map((k) => (
                     <option key={k} value={k}>
-                      {k}
+                      {k} {classStudentCounts.get(k) ? `(${classStudentCounts.get(k)} siswa)` : ""}
                     </option>
                   ))}
               </optgroup>
@@ -595,7 +745,7 @@ export default function InputPage() {
                   .filter((k) => k.startsWith("XI "))
                   .map((k) => (
                     <option key={k} value={k}>
-                      {k}
+                      {k} {classStudentCounts.get(k) ? `(${classStudentCounts.get(k)} siswa)` : ""}
                     </option>
                   ))}
               </optgroup>
@@ -604,7 +754,7 @@ export default function InputPage() {
                   .filter((k) => k.startsWith("XII "))
                   .map((k) => (
                     <option key={k} value={k}>
-                      {k}
+                      {k} {classStudentCounts.get(k) ? `(${classStudentCounts.get(k)} siswa)` : ""}
                     </option>
                   ))}
               </optgroup>
@@ -621,7 +771,7 @@ export default function InputPage() {
                     )
                     .map((k) => (
                       <option key={k} value={k}>
-                        {k}
+                        {k} {classStudentCounts.get(k) ? `(${classStudentCounts.get(k)} siswa)` : ""}
                       </option>
                     ))}
                 </optgroup>
@@ -772,11 +922,73 @@ export default function InputPage() {
                 </label>
               </div>
 
+              {/* Saldo lebih terdeteksi notice */}
+              {nama && (studentSurplusMap.get(normalizeName(nama)) || 0) > 0 && (() => {
+                const currentSurplus = studentSurplusMap.get(normalizeName(nama))!;
+                const isFullyCovered = currentSurplus >= KAS_RUTIN_DEFAULT;
+                return (
+                  <div className="flex items-center gap-2 rounded-lg border border-emerald-500/30 bg-emerald-500/10 p-2.5 text-xs text-emerald-700 dark:text-emerald-300">
+                    <Sparkles className="h-4 w-4 shrink-0 text-emerald-500" />
+                    <div>
+                      <span className="font-bold">
+                        Saldo Lebih Terdeteksi: {formatRupiah(currentSurplus)}
+                      </span>
+                      <p className="text-[11px] opacity-90">
+                        {isFullyCovered
+                          ? "Siswa ini memiliki saldo kas penuh dari minggu sebelumnya. Iuran kas otomatis tertutupi dari alihan saldo."
+                          : `Siswa memiliki tabungan alihan ${formatRupiah(currentSurplus)}. Cukup bayar kekurangan ${formatRupiah(KAS_RUTIN_DEFAULT - currentSurplus)} untuk melunasi iuran ${formatRupiah(KAS_RUTIN_DEFAULT)} minggu ini.`}
+                      </p>
+                    </div>
+                  </div>
+                );
+              })()}
+
               {bayarKas && (
-                <div className="pt-2 border-t border-border/50">
-                  <label htmlFor="input-kas" className="label text-xs">
-                    Nominal Kas (Rp)
-                  </label>
+                <div className="pt-2 border-t border-border/50 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <label htmlFor="input-kas" className="label text-xs !mb-0">
+                      Nominal Kas (Rp)
+                    </label>
+                    <div className="flex items-center gap-1">
+                      <button
+                        type="button"
+                        onClick={() => setNominalKas("0")}
+                        className={`px-2 py-0.5 text-[10px] font-bold rounded-lg border transition-all ${
+                          nominalKas === "0"
+                            ? "bg-rose-500/20 text-rose-600 border-rose-500/40"
+                            : "bg-surface-2 text-muted border-border hover:text-foreground"
+                        }`}
+                        title="Member tidak bawa uang kas hari ini"
+                      >
+                        Rp 0 (Nunggak)
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setNominalKas(`${KAS_RUTIN_DEFAULT}`)}
+                        className={`px-2 py-0.5 text-[10px] font-bold rounded-lg border transition-all ${
+                          nominalKas === `${KAS_RUTIN_DEFAULT}`
+                            ? "bg-emerald-500/20 text-emerald-600 border-emerald-500/40"
+                            : "bg-surface-2 text-muted border-border hover:text-foreground"
+                        }`}
+                        title="Bayar pas Rp 2.000"
+                      >
+                        Rp 2k (Pas)
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setNominalKas("5000")}
+                        className={`px-2 py-0.5 text-[10px] font-bold rounded-lg border transition-all ${
+                          nominalKas === "5000"
+                            ? "bg-amber-500/20 text-amber-600 border-amber-500/40"
+                            : "bg-surface-2 text-muted border-border hover:text-foreground"
+                        }`}
+                        title="Bayar Rp 5.000 (sisa Rp 3.000 dialihkan)"
+                      >
+                        Rp 5k (+Alih 3k)
+                      </button>
+                    </div>
+                  </div>
+
                   <input
                     id="input-kas"
                     type="number"
@@ -786,6 +998,25 @@ export default function InputPage() {
                     value={nominalKas}
                     onChange={(e) => setNominalKas(e.target.value)}
                   />
+
+                  {Number(nominalKas) === 0 && statusAbsen === "Hadir" && (
+                    <p className="mt-1 flex items-center gap-1.5 text-xs font-semibold text-rose-600 dark:text-rose-400 bg-rose-500/10 p-2 rounded-lg border border-rose-500/20">
+                      <AlertCircle className="h-3.5 w-3.5 shrink-0" />
+                      <span>
+                        Siswa Hadir tapi kas Rp 0 (tidak bawa uang). Akan tercatat <strong>Menunggak {formatRupiah(KAS_RUTIN_DEFAULT)}</strong> untuk pertemuan ini.
+                      </span>
+                    </p>
+                  )}
+
+                  {Number(nominalKas) > KAS_RUTIN_DEFAULT && (
+                    <p className="mt-1.5 flex items-center gap-1.5 text-xs font-semibold text-amber-600 dark:text-amber-300">
+                      <Sparkles className="h-3.5 w-3.5 shrink-0" />
+                      <span>
+                        {formatRupiah(KAS_RUTIN_DEFAULT)} untuk pertemuan ini. Sisa{" "}
+                        <strong>{formatRupiah(Number(nominalKas) - KAS_RUTIN_DEFAULT)}</strong> otomatis dialihkan ke minggu selanjutnya!
+                      </span>
+                    </p>
+                  )}
                 </div>
               )}
             </div>
@@ -845,14 +1076,43 @@ export default function InputPage() {
                 </p>
               </div>
             ) : quickStudents.length === 0 ? (
-              <div className="py-8 text-center text-xs text-muted">
-                <AlertCircle className="mx-auto h-8 w-8 text-muted" />
-                <p className="mt-2 font-medium">
-                  Belum ada riwayat siswa untuk kelas <strong>{kelas}</strong> di Gen {gen}.
+              <div className="rounded-2xl border-2 border-dashed border-border bg-surface-2 p-6 text-center space-y-3">
+                <AlertCircle className="mx-auto h-8 w-8 text-accent" />
+                <p className="text-sm font-bold text-foreground">
+                  {kelas === "semua"
+                    ? `Belum ada riwayat siswa di Gen ${gen}.`
+                    : `Belum ada riwayat siswa untuk kelas ${kelas} di Gen ${gen}.`}
                 </p>
-                <p className="mt-1">
-                  Gunakan <strong>Input Manual</strong> terlebih dahulu untuk mendaftarkan siswa baru.
+                <p className="text-xs text-muted">
+                  Anda bisa langsung menambahkan nama siswa ke daftar di bawah ini:
                 </p>
+                <form onSubmit={handleAddQuickStudent} className="mx-auto max-w-md flex flex-col sm:flex-row gap-2 pt-2">
+                  <input
+                    type="text"
+                    placeholder="Nama siswa baru..."
+                    value={quickNewNama}
+                    onChange={(e) => setQuickNewNama(e.target.value)}
+                    className="input text-xs uppercase flex-1"
+                    required
+                  />
+                  {kelas === "semua" && (
+                    <input
+                      type="text"
+                      placeholder="Kelas (misal: X TJKT 1)"
+                      value={quickNewKelas}
+                      onChange={(e) => setQuickNewKelas(e.target.value)}
+                      className="input text-xs uppercase w-full sm:w-36"
+                      required
+                    />
+                  )}
+                  <button
+                    type="submit"
+                    className="btn btn-primary min-h-[38px] px-4 text-xs font-bold shrink-0 flex items-center justify-center gap-1.5"
+                  >
+                    <UserPlus className="h-4 w-4" />
+                    Tambah
+                  </button>
+                </form>
               </div>
             ) : (
               <>
@@ -860,10 +1120,10 @@ export default function InputPage() {
                 <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border-2 border-border bg-surface-2 p-4">
                   <div>
                     <p className="text-xs font-bold uppercase text-foreground">
-                      Daftar Siswa {kelas} (Gen {gen})
+                      Daftar Siswa {kelas === "semua" ? `Semua Kelas (Gen ${gen})` : `${kelas} (Gen ${gen})`}
                     </p>
-                    <p className="text-xs text-muted">
-                      {quickStats.terisi} dari {quickStats.total} siswa diisi •{" "}
+                    <p className="mt-1 text-xs text-muted">
+                      {quickStats.terisi} dari {quickStats.total} siswa terisi •{" "}
                       <span className="text-emerald-600 dark:text-emerald-300 font-bold">{quickStats.hadir} Hadir</span> •{" "}
                       <span className="text-amber-600 dark:text-amber-300 font-bold">{quickStats.sakit} Sakit</span> •{" "}
                       <span className="text-accent font-bold">{quickStats.izin} Izin</span> •{" "}
@@ -871,115 +1131,233 @@ export default function InputPage() {
                       Kas: <strong className="text-accent">{formatRupiah(quickStats.totalKas)}</strong>
                     </p>
                   </div>
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2 flex-wrap">
                     <button
                       type="button"
                       onClick={() => toggleAllStudents("Hadir")}
-                      className="btn btn-secondary min-h-[44px] px-3 py-1.5 text-xs font-bold"
+                      className="btn btn-secondary min-h-[38px] px-3 py-1.5 text-xs font-bold"
                     >
-                      Hadir Semua
+                      Hadir Semua (+Rp 2k)
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        toggleAllStudents("Hadir");
+                        setAllStudentsKas(0);
+                      }}
+                      className="btn btn-ghost min-h-[38px] px-2.5 py-1.5 text-xs font-semibold border border-border"
+                      title="Tandai Hadir semua dengan kas Rp 0 (Free Kas)"
+                    >
+                      Hadir (Kas Rp 0)
                     </button>
                     <button
                       type="button"
                       onClick={() => toggleAllStudents(null)}
-                      className="btn btn-ghost min-h-[44px] px-3 py-1.5 text-xs font-bold"
+                      className="btn btn-ghost min-h-[38px] px-3 py-1.5 text-xs font-bold"
                     >
                       Kosongkan
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setShowAddForm((prev) => !prev)}
+                      className="btn btn-ghost min-h-[38px] px-2.5 py-1.5 text-xs font-bold text-accent border border-accent/30 hover:bg-accent/10"
+                      title="Tambah siswa baru ke daftar"
+                    >
+                      <UserPlus className="h-3.5 w-3.5" />
+                      <span>{showAddForm ? "Tutup" : "+ Siswa"}</span>
                     </button>
                   </div>
                 </div>
 
-                {/* Status palette: drag (desktop) / ketuk lalu ketuk siswa (HP) */}
-                <div className="rounded-xl border-2 border-border bg-surface p-3">
-                  <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-                    {(["Hadir", "Sakit", "Izin", "Alfa"] as StatusAbsen[]).map((st) => {
-                      const isPicked = pickedStatus === st;
-                      return (
-                        <button
-                          key={st}
-                          type="button"
-                          draggable
-                          onDragStart={(e) => handleStatusDragStart(e, st)}
-                          onClick={() =>
-                            setPickedStatus((prev) => (prev === st ? null : st))
-                          }
-                          className={`flex min-h-[44px] items-center justify-center gap-1.5 rounded-xl border-2 font-display text-sm font-extrabold uppercase tracking-wide transition-all cursor-grab active:cursor-grabbing ${
-                            isPicked
-                              ? `${STATUS_STYLES[st].chip} ring-2 ring-offset-2 ring-offset-surface`
-                              : `${STATUS_STYLES[st].chip} opacity-80 hover:opacity-100`
-                          }`}
-                        >
-                          <GripVertical className="h-3.5 w-3.5" />
-                          {st}
-                          {isPicked && (
-                            <span className="ml-0.5 text-[9px] font-bold normal-case tracking-normal">
-                              dipilih
-                            </span>
-                          )}
-                        </button>
-                      );
-                    })}
-                  </div>
-                  <p className="mt-2 text-center text-[10px] font-semibold uppercase tracking-wider text-muted">
-                    {pickedStatus
-                      ? `Ketuk siswa untuk menandai ${pickedStatus}`
-                      : "Drag / ketuk status, lalu ketuk nama siswa untuk menandai"}
-                  </p>
-                </div>
-
-                {/* Quick students checklist */}
-                <div className="space-y-2 max-h-96 overflow-y-auto pr-1">
-                  {quickStudents.map((s) => (
-                    <div
-                      key={s.nama}
-                      onClick={() => handleRowTap(s.nama)}
-                      onDragOver={(e) => {
-                        e.preventDefault();
-                        setDragOverNama(s.nama);
-                      }}
-                      onDragLeave={() => setDragOverNama((prev) => (prev === s.nama ? null : prev))}
-                      onDrop={(e) => handleRowDrop(e, s.nama)}
-                      className={`flex cursor-pointer items-center justify-between rounded-xl border-2 p-3 transition-all ${
-                        s.status
-                          ? STATUS_STYLES[s.status].row
-                          : "border-border bg-surface hover:bg-surface-2 text-muted"
-                      } ${dragOverNama === s.nama ? "ring-2 ring-accent" : ""}`}
+                {/* Inline form to add student to list */}
+                {showAddForm && (
+                  <form
+                    onSubmit={handleAddQuickStudent}
+                    className="flex flex-col sm:flex-row gap-2 rounded-xl border-2 border-accent/40 bg-accent/5 p-3 animate-fade-in"
+                  >
+                    <input
+                      type="text"
+                      placeholder="Ketik nama siswa baru..."
+                      value={quickNewNama}
+                      onChange={(e) => setQuickNewNama(e.target.value)}
+                      className="input text-xs uppercase flex-1"
+                      required
+                      autoFocus
+                    />
+                    {kelas === "semua" && (
+                      <input
+                        type="text"
+                        placeholder="Kelas (contoh: X TJKT 1)"
+                        value={quickNewKelas}
+                        onChange={(e) => setQuickNewKelas(e.target.value)}
+                        className="input text-xs uppercase w-full sm:w-36"
+                        required
+                      />
+                    )}
+                    <button
+                      type="submit"
+                      className="btn btn-primary min-h-[38px] px-4 text-xs font-bold shrink-0 flex items-center justify-center gap-1.5"
                     >
-                      <div className="flex min-w-0 items-center gap-2.5">
-                        <span className="font-semibold text-sm uppercase text-foreground truncate">
-                          {s.nama}
-                        </span>
-                        {s.status ? (
-                          <span className={`badge shrink-0 font-bold ${STATUS_STYLES[s.status].badge}`}>
-                            {s.status}
-                          </span>
-                        ) : (
-                          <span className="shrink-0 text-[10px] font-bold uppercase text-muted">
-                            belum diisi
-                          </span>
-                        )}
-                      </div>
+                      <Plus className="h-4 w-4" />
+                      Tambahkan
+                    </button>
+                  </form>
+                )}
 
-                      {s.status === "Hadir" && (
-                        <div
-                          className="flex items-center gap-1.5"
-                          onClick={(e) => e.stopPropagation()}
-                        >
-                          <span className="text-xs font-bold text-muted">Kas:</span>
-                          <input
-                            type="number"
-                            min="0"
-                            step="500"
-                            className="input !h-8 !w-24 px-2 py-1 text-right text-xs font-bold tabular-nums"
-                            value={s.nominalKas}
-                            onChange={(e) =>
-                              setStudentKas(s.nama, Number(e.target.value) || 0)
-                            }
-                          />
+                {/* Quick students checklist cards with 1-tap buttons */}
+                <div className="space-y-2.5 max-h-[500px] overflow-y-auto pr-1">
+                  {quickStudents.map((s) => {
+                    const surplus = studentSurplusMap.get(s.nama) || 0;
+                    const isLunasViaAlihan = surplus >= KAS_RUTIN_DEFAULT && s.nominalKas === 0;
+
+                    return (
+                      <div
+                        key={s.nama}
+                        className={`rounded-2xl border-2 p-3.5 transition-all shadow-2xs ${
+                          s.status
+                            ? STATUS_STYLES[s.status].row
+                            : "border-border bg-surface hover:bg-surface-2"
+                        }`}
+                      >
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+                          {/* Nama & Kelas & Saldo */}
+                          <div className="flex items-center gap-2 min-w-0 flex-wrap">
+                            <span className="font-bold text-sm uppercase text-foreground truncate">
+                              {s.nama}
+                            </span>
+                            <span className="badge bg-surface-2 text-muted text-[10px] font-semibold shrink-0">
+                              {s.kelas}
+                            </span>
+                            {surplus > 0 && (
+                              <span
+                                className="badge bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/30 text-[9px] font-bold shrink-0"
+                                title="Siswa memiliki saldo alihan lebih dari pertemuan sebelumnya"
+                              >
+                                Saldo +{formatRupiah(surplus)}
+                              </span>
+                            )}
+                          </div>
+
+                          {/* 4 Direct 1-Tap Status Buttons */}
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            {(["Hadir", "Sakit", "Izin", "Alfa"] as StatusAbsen[]).map((st) => {
+                              const isSelected = s.status === st;
+                              return (
+                                <button
+                                  key={st}
+                                  type="button"
+                                  onClick={() => handleStatusClick(s.nama, st)}
+                                  className={`flex items-center gap-1 min-h-[36px] px-3 py-1 text-xs font-bold rounded-xl border transition-all ${
+                                    isSelected
+                                      ? `${STATUS_STYLES[st].chip} ring-2 ring-current shadow-xs scale-102`
+                                      : "border-border bg-surface-2 text-muted hover:text-foreground hover:bg-surface"
+                                  }`}
+                                >
+                                  {isSelected && <Check className="h-3 w-3" />}
+                                  {st}
+                                </button>
+                              );
+                            })}
+                          </div>
                         </div>
-                      )}
-                    </div>
-                  ))}
+
+                        {/* Kas Input (Selalu Tampil agar Mudah Diedit / Dilihat) */}
+                        <div className="mt-2.5 pt-2.5 border-t border-border/40 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs">
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            {isLunasViaAlihan ? (
+                              <span className="badge bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border border-emerald-500/30 text-[10px] font-bold">
+                                ✓ Lunas Otomatis (Alihan Saldo)
+                              </span>
+                            ) : surplus > 0 && surplus < KAS_RUTIN_DEFAULT ? (
+                              <span className="badge bg-amber-500/15 text-amber-700 dark:text-amber-300 border border-amber-500/30 text-[10px] font-bold">
+                                Sisa Kurang: {formatRupiah(KAS_RUTIN_DEFAULT - surplus)}
+                              </span>
+                            ) : s.status === "Sakit" || s.status === "Izin" ? (
+                              <span className="badge bg-blue-500/15 text-blue-700 dark:text-blue-300 border border-blue-500/30 text-[10px] font-bold">
+                                Titip Kas (Opsional):
+                              </span>
+                            ) : s.status === "Alfa" ? (
+                              <span className="badge bg-danger/15 text-danger border border-danger/30 text-[10px] font-bold">
+                                Alfa (Kas Rp 0):
+                              </span>
+                            ) : s.nominalKas === 0 ? (
+                              <span className="badge bg-rose-500/15 text-rose-700 dark:text-rose-400 border border-rose-500/30 text-[10px] font-bold">
+                                ⚠️ Ga Bawa Uang (Nunggak)
+                              </span>
+                            ) : (
+                              <span className="text-[11px] font-bold text-muted flex items-center gap-1">
+                                <span>Iuran Kas:</span>
+                                {s.status === null && (
+                                  <span className="text-[9px] font-normal text-muted italic">
+                                    (klik nominal auto Hadir)
+                                  </span>
+                                )}
+                              </span>
+                            )}
+                          </div>
+
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            {/* Quick Presets: 0 | 2k | 5k */}
+                            <div className="inline-flex items-center gap-1">
+                              <button
+                                type="button"
+                                onClick={() => setStudentKas(s.nama, 0)}
+                                className={`px-2 py-0.5 text-[10px] font-bold rounded-lg border transition-all ${
+                                  s.nominalKas === 0
+                                    ? "bg-rose-500/20 text-rose-600 border-rose-500/40 font-black"
+                                    : "bg-surface-2 text-muted border-border hover:text-foreground"
+                                }`}
+                                title="Ga bawa uang kas (catat nunggak)"
+                              >
+                                Rp 0
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setStudentKas(s.nama, KAS_RUTIN_DEFAULT)}
+                                className={`px-2 py-0.5 text-[10px] font-bold rounded-lg border transition-all ${
+                                  s.nominalKas === KAS_RUTIN_DEFAULT
+                                    ? "bg-emerald-500/20 text-emerald-600 border-emerald-500/40 font-black"
+                                    : "bg-surface-2 text-muted border-border hover:text-foreground"
+                                }`}
+                                title="Bayar pas Rp 2.000"
+                              >
+                                2k
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setStudentKas(s.nama, 5000)}
+                                className={`px-2 py-0.5 text-[10px] font-bold rounded-lg border transition-all ${
+                                  s.nominalKas === 5000
+                                    ? "bg-amber-500/20 text-amber-600 border-amber-500/40 font-black"
+                                    : "bg-surface-2 text-muted border-border hover:text-foreground"
+                                }`}
+                                title="Bayar Rp 5.000 (sisa Rp 3.000 dialihkan)"
+                              >
+                                5k
+                              </button>
+                            </div>
+
+                            <span className="text-xs font-mono text-muted">Rp</span>
+                            <input
+                              type="number"
+                              min="0"
+                              step="500"
+                              className="input !h-8 !w-20 px-2 py-1 text-right text-xs font-bold tabular-nums"
+                              value={s.nominalKas}
+                              onChange={(e) =>
+                                setStudentKas(s.nama, Number(e.target.value) || 0)
+                              }
+                            />
+                            {s.nominalKas > KAS_RUTIN_DEFAULT && (
+                              <span className="text-[10px] font-bold text-amber-600 dark:text-amber-400 bg-amber-500/10 px-1.5 py-0.5 rounded">
+                                +Alih {formatRupiah(s.nominalKas - KAS_RUTIN_DEFAULT)}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
 
                 {/* Live Target Confirmation Card */}
@@ -988,7 +1366,7 @@ export default function InputPage() {
                     Target Konfirmasi Mode Cepat:
                   </p>
                   <p className="mt-1 font-bold text-foreground">
-                    Menyimpan <strong className="text-accent">{quickStats.terisi} siswa</strong> ke <strong>GEN {gen}</strong> • Kelas <strong>{kelas}</strong> • Tanggal <strong>{formatTanggalIndo(parseISOTanggal(tanggal))}</strong>
+                    Menyimpan <strong className="text-accent">{quickStats.terisi} siswa</strong> ke <strong>GEN {gen}</strong> • {kelas === "semua" ? "Semua Kelas" : `Kelas ${kelas}`} • Tanggal <strong>{formatTanggalIndo(parseISOTanggal(tanggal))}</strong>
                   </p>
                 </div>
 

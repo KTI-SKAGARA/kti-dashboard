@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { Plus, Trash2, Loader2 } from "lucide-react";
 import type { Budget, ExpenseCategory } from "@/types/finance";
 import { formatRupiah } from "@/lib/utils";
@@ -8,7 +8,7 @@ import { formatRupiah } from "@/lib/utils";
 interface Props {
   budgets: Budget[];
   categories: ExpenseCategory[];
-  bulanTahun: string;
+  bulanTahun?: string;
   expensesByCategory: { category: string; total: number }[];
   loading: boolean;
   onAdd: (categoryId: string, target: number) => Promise<void>;
@@ -18,7 +18,6 @@ interface Props {
 export default function BudgetView({
   budgets,
   categories,
-  bulanTahun,
   expensesByCategory,
   loading,
   onAdd,
@@ -28,16 +27,12 @@ export default function BudgetView({
   const [addTarget, setAddTarget] = useState("");
   const [adding, setAdding] = useState(false);
 
-  useEffect(() => {
-    if (categories.length > 0 && !addCatId) {
-      setAddCatId(categories[0].id);
-    }
-  }, [categories, addCatId]);
+  const selectedCatId = addCatId || (categories.length > 0 ? categories[0].id : "");
 
   const handleAdd = async () => {
-    if (!addCatId || !addTarget) return;
+    if (!selectedCatId || !addTarget) return;
     setAdding(true);
-    await onAdd(addCatId, Number(addTarget));
+    await onAdd(selectedCatId, Number(addTarget));
     setAddTarget("");
     setAdding(false);
   };
@@ -60,7 +55,7 @@ export default function BudgetView({
           <label className="label">Kategori</label>
           <select
             className="select"
-            value={addCatId}
+            value={selectedCatId}
             onChange={(e) => setAddCatId(e.target.value)}
           >
             {categories.map((c) => (

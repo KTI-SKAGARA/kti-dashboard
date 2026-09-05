@@ -20,6 +20,7 @@ import {
   FlaskConical,
   KeyRound,
   Wallet,
+  Coins,
 } from "lucide-react";
 
 export default function Navbar() {
@@ -32,7 +33,7 @@ export default function Navbar() {
   const [userRole, setUserRole] = useState<string>("viewer");
 
   useEffect(() => {
-    setMounted(true);
+    setMounted(true); // eslint-disable-line react-hooks/set-state-in-effect
   }, []);
 
   useEffect(() => {
@@ -76,8 +77,8 @@ export default function Navbar() {
   const allNavLinks = [
     { href: "/", label: "Dashboard", icon: LayoutDashboard },
     { href: "/input", label: "Input", icon: PlusCircle },
-    { href: "/kalender", label: "Kalender", icon: CalendarDays },
     { href: "/finance", label: "Keuangan", icon: Wallet },
+    { href: "/kalender", label: "Kalender", icon: CalendarDays },
     { href: "/admin", label: "Admin", icon: Settings, adminOnly: true },
   ];
 
@@ -206,7 +207,10 @@ export default function Navbar() {
       {/* Mobile bottom navigation */}
       {!isLoginPage && (
         <nav className="fixed inset-x-0 bottom-0 z-30 border-t-2 border-border bg-glass-bg backdrop-blur-md pb-[env(safe-area-inset-bottom)] md:hidden">
-          <div className="grid grid-cols-4">
+          <div
+            className="grid"
+            style={{ gridTemplateColumns: `repeat(${navLinks.length}, minmax(0, 1fr))` }}
+          >
             {navLinks.map((link) => (
               <Link
                 key={link.href}

@@ -45,8 +45,11 @@ export default memo(function EditRecordModal({
   onCancel,
 }: EditRecordModalProps) {
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-foreground/50 p-4">
-      <div className="card w-full max-w-md p-6 shadow-lg">
+    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/60 p-0 sm:p-4 backdrop-blur-md animate-fade-in">
+      <div className="card w-full max-w-md rounded-t-3xl sm:rounded-2xl p-5 sm:p-6 shadow-2xl pb-8 sm:pb-6 overflow-hidden">
+        {/* Mobile Drag Indicator Pill */}
+        <div className="mx-auto mb-2 h-1.5 w-12 rounded-full bg-border sm:hidden" />
+
         <h3 className="font-display text-lg font-extrabold uppercase tracking-tight text-foreground">
           Edit Data Absensi
         </h3>

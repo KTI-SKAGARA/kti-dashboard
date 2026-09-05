@@ -6,6 +6,7 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from "react";
@@ -35,6 +36,11 @@ export function AttendanceDataProvider({ children }: { children: ReactNode }) {
   const [cache, setCache] = useState<Map<Gen, GenCacheEntry>>(new Map());
   const [loadingGens, setLoadingGens] = useState<Set<Gen>>(new Set());
 
+  const cacheRef = useRef(cache);
+  useEffect(() => {
+    cacheRef.current = cache;
+  }, [cache]);
+
   const getRecords = useCallback(
     (gen: Gen) => cache.get(gen)?.data ?? null,
     [cache]
@@ -52,7 +58,7 @@ export function AttendanceDataProvider({ children }: { children: ReactNode }) {
   const loadGen = useCallback(
     async (gen: Gen, opts?: { force?: boolean }): Promise<AttendanceRecord[] | null> => {
       const now = Date.now();
-      const entry = cache.get(gen);
+      const entry = cacheRef.current.get(gen);
       if (!opts?.force && entry && now - entry.at < CACHE_TTL_MS) {
         return entry.data;
       }
@@ -74,7 +80,7 @@ export function AttendanceDataProvider({ children }: { children: ReactNode }) {
         });
       }
     },
-    [cache]
+    []
   );
 
   const value = useMemo(

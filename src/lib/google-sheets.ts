@@ -765,3 +765,119 @@ export async function moveRecordsBatch(
   invalidateCache(fromGen);
   invalidateCache(targetGen);
 }
+
+/**
+ * Rename a student across Google Sheets attendance records (fixing typos).
+ * If targetGen is provided, updates only that gen tab. Otherwise, updates all active gens.
+ * Returns the count of attendance record rows updated.
+ */
+export async function renameStudentRecordInSheet(
+  oldName: string,
+  newName: string,
+  targetGen?: Gen
+): Promise<number> {
+  const normOld = normalizeName(oldName);
+  const normNew = normalizeName(newName);
+  if (!normOld || !normNew || normOld === normNew) return 0;
+
+  let gensToProcess: Gen[] = [];
+  if (targetGen) {
+    gensToProcess = [targetGen];
+  } else {
+    const config = await getGenConfig();
+    gensToProcess = config.map((c) => c.gen);
+  }
+
+  let totalUpdated = 0;
+
+  if (!isGoogleSheetsConfigured()) {
+    for (const g of gensToProcess) {
+      const list = mockAppended[g] || [];
+      for (const r of list) {
+        if (normalizeName(r.nama) === normOld) {
+          r.nama = normNew;
+          totalUpdated++;
+        }
+      }
+      invalidateCache(g);
+    }
+    return totalUpdated;
+  }
+
+  for (const g of gensToProcess) {
+    try {
+      const tabName = getGenTabName(g);
+      const sheet = await getSheet(tabName);
+      const rows: GoogleSpreadsheetRow[] = await sheet.getRows();
+      let genUpdated = 0;
+
+      for (const row of rows) {
+        if (normalizeName(row.get("Nama") ?? "") === normOld) {
+          row.set("Nama", normNew);
+          await row.save();
+          genUpdated++;
+          totalUpdated++;
+        }
+      }
+
+      if (genUpdated > 0) {
+        invalidateCache(g);
+      }
+    } catch {
+      // Tab might not exist, skip safely
+    }
+  }
+
+  return totalUpdated;
+}
+
+/**
+ * Move all attendance records of a specific student from one gen to another.
+ * Returns the count of records moved.
+ */
+export async function moveStudentRecordsInSheet(
+  nama: string,
+  fromGen: Gen,
+  targetGen: Gen
+): Promise<number> {
+  const normName = normalizeName(nama);
+  if (fromGen === targetGen || !normName) return 0;
+
+  if (!isGoogleSheetsConfigured()) {
+    if (!mockAppended[targetGen]) mockAppended[targetGen] = [];
+    const source = mockAppended[fromGen] || [];
+    let moved = 0;
+    mockAppended[fromGen] = source.filter((r) => {
+      if (normalizeName(r.nama) === normName) {
+        mockAppended[targetGen].push(r);
+        moved++;
+        return false;
+      }
+      return true;
+    });
+    invalidateCache(fromGen);
+    invalidateCache(targetGen);
+    return moved;
+  }
+
+  const fromSheet = await getSheet(getGenTabName(fromGen));
+  const rows: GoogleSpreadsheetRow[] = await fromSheet.getRows();
+
+  const matchingRows = rows.filter(
+    (r) => normalizeName(r.get("Nama") ?? "") === normName
+  );
+
+  if (matchingRows.length === 0) return 0;
+
+  // Ensure every matching row has a valid rowId
+  for (const r of matchingRows) {
+    if (!(r.get(ROW_ID_COLUMN) || "").trim()) {
+      r.set(ROW_ID_COLUMN, generateRowId());
+      await r.save();
+    }
+  }
+
+  const rowIds = matchingRows.map((r) => (r.get(ROW_ID_COLUMN) || "").trim()).filter(Boolean);
+  await moveRecordsBatch(fromGen, rowIds, targetGen);
+  return matchingRows.length;
+}
